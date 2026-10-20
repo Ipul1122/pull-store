@@ -59,6 +59,10 @@ const serviceFilter = ref<'all' | 'tugas-akhir' | 'apk-offline' | 'landing-page'
 const searchQuery = ref('')
 const isAiLinkCopied = ref(false)
 
+// Active Target Card Locking (prevents marquee running or infinite reset when user visits a direct product/service link)
+const activeTargetCardId = ref<string | null>(null)
+const activeTargetServiceId = ref<string | null>(null)
+
 // Category Counts
 const productCounts = computed(() => {
   return {
@@ -149,6 +153,8 @@ const getSingleSetWidth = (): number => {
 
 // Initialize scroll position to center set (so users can scroll left or right immediately)
 const initInfinitePosition = () => {
+  // If a specific card is currently targeted/locked, do NOT reset to start of set (ChatGPT)
+  if (activeTargetCardId.value) return
   nextTick(() => {
     if (!productCarouselRef.value) return
     const singleSet = getSingleSetWidth()
@@ -260,27 +266,35 @@ const handleTouchStart = () => {
 }
 
 const handleTouchEnd = () => {
+  // Never automatically resume marquee if it was paused/disabled for a direct link or by the user
+  if (!isMarqueePlaying.value) return
   if (resumeTimeout) clearTimeout(resumeTimeout)
   resumeTimeout = setTimeout(() => {
-    isHovered.value = false
+    if (isMarqueePlaying.value) {
+      isHovered.value = false
+    }
   }, 2500)
 }
 
-// Watch filtered products and reset carousel scroll to center set
+// Watch filtered products and preserve targeted card or reset carousel scroll to center set
 watch(() => filteredProducts.value, () => {
   nextTick(() => {
-    initInfinitePosition()
+    if (activeTargetCardId.value) {
+      // Re-center on the target card once Supabase data arrives
+      scrollToProductCard(activeTargetCardId.value)
+    } else {
+      initInfinitePosition()
+    }
   })
 })
 
-// Set digital filter and sync to URL hash
+// Set digital filter and sync to URL hash (clearing any leftover query params like ?product=...)
 const setDigitalFilter = (filter: 'all' | 'ai' | 'edit' | 'rating' | 'streaming') => {
+  activeTargetCardId.value = null // User intentionally selected a filter, release card lock
   digitalFilter.value = filter
-  if (filter === 'all') {
-    history.replaceState(null, '', '#semua-produk-pull-store')
-  } else {
-    history.replaceState(null, '', `#${filter}`)
-  }
+  const targetHash = filter === 'all' ? '#semua-produk-pull-store' : `#${filter}`
+  // Clean URL: Replace state with pathname + hash, stripping out any leftover ?product= or other queries
+  history.replaceState(null, '', window.location.pathname + targetHash)
   nextTick(() => {
     initInfinitePosition()
   })
@@ -340,6 +354,8 @@ const getSingleServiceSetWidth = (): number => {
 
 // Initialize scroll position to center set
 const initInfiniteServicePosition = () => {
+  // If a specific service card is currently targeted/locked, do NOT reset
+  if (activeTargetServiceId.value) return
   nextTick(() => {
     if (!serviceCarouselRef.value) return
     const singleSet = getSingleServiceSetWidth()
@@ -408,16 +424,24 @@ const handleServiceTouchStart = () => {
 }
 
 const handleServiceTouchEnd = () => {
+  // Never automatically resume service marquee if it was paused/disabled
+  if (!isServiceMarqueePlaying.value) return
   if (serviceResumeTimeout) clearTimeout(serviceResumeTimeout)
   serviceResumeTimeout = setTimeout(() => {
-    isServiceHovered.value = false
+    if (isServiceMarqueePlaying.value) {
+      isServiceHovered.value = false
+    }
   }, 2500)
 }
 
-// Watch filtered services and reset carousel scroll to center set
+// Watch filtered services and preserve targeted service card or reset carousel scroll to center set
 watch(() => filteredServices.value, () => {
   nextTick(() => {
-    initInfiniteServicePosition()
+    if (activeTargetServiceId.value) {
+      scrollToServiceCard(activeTargetServiceId.value)
+    } else {
+      initInfiniteServicePosition()
+    }
   })
 })
 
@@ -434,9 +458,11 @@ const serviceHashMap: Record<'all' | 'tugas-akhir' | 'apk-offline' | 'landing-pa
 const isServiceLinkCopied = ref(false)
 
 const setServiceFilter = (filter: 'all' | 'tugas-akhir' | 'landing-page' | 'web-dinamis' | 'apk-offline' | 'custom-web') => {
+  activeTargetServiceId.value = null // User intentionally selected a filter, release card lock
   serviceFilter.value = filter
   const targetHash = serviceHashMap[filter] || '#semua-jasa-pull-store'
-  history.replaceState(null, '', targetHash)
+  // Clean URL: Replace state with pathname + hash, stripping out any leftover query params
+  history.replaceState(null, '', window.location.pathname + targetHash)
   nextTick(() => {
     initInfiniteServicePosition()
   })
@@ -523,6 +549,18 @@ const copyAiCategoryLink = async () => {
 
 // Smooth scroll & highlight targeted product card in carousel
 const scrollToProductCard = (productId: string) => {
+  activeTargetCardId.value = productId
+
+  // STOP auto-marquee when user arrives on a direct product link so the card never drifts away!
+  isMarqueePlaying.value = false
+  isHovered.value = true
+  if (resumeTimeout) clearTimeout(resumeTimeout)
+
+  // Clean URL: Strip leftover query parameters (like ?product=google-maps) so navigating later won't inherit them
+  if (window.location.search) {
+    history.replaceState(null, '', window.location.pathname + `#${productId}`)
+  }
+
   nextTick(() => {
     setTimeout(() => {
       const cardEl = document.getElementById('product-' + productId)
@@ -534,8 +572,6 @@ const scrollToProductCard = (productId: string) => {
       }
 
       if (cardEl && container) {
-        pauseMarqueeTemporarily(7000)
-
         // Center the card horizontally inside carousel track
         const cardOffset = cardEl.offsetLeft
         const cardWidth = cardEl.offsetWidth
@@ -551,7 +587,7 @@ const scrollToProductCard = (productId: string) => {
         cardEl.classList.add('ring-4', 'ring-blue-500', 'shadow-2xl', 'scale-[1.02]', 'transition-all', 'duration-300')
         setTimeout(() => {
           cardEl.classList.remove('ring-4', 'ring-blue-500', 'shadow-2xl', 'scale-[1.02]')
-        }, 4000)
+        }, 5000)
       }
     }, 280)
   })
@@ -559,6 +595,18 @@ const scrollToProductCard = (productId: string) => {
 
 // Smooth scroll & highlight targeted service card in carousel
 const scrollToServiceCard = (serviceId: string) => {
+  activeTargetServiceId.value = serviceId
+
+  // STOP auto-marquee when user arrives on a direct service link
+  isServiceMarqueePlaying.value = false
+  isServiceHovered.value = true
+  if (serviceResumeTimeout) clearTimeout(serviceResumeTimeout)
+
+  // Clean URL query parameters
+  if (window.location.search) {
+    history.replaceState(null, '', window.location.pathname + `#${serviceId}`)
+  }
+
   nextTick(() => {
     setTimeout(() => {
       const cardEl = document.getElementById('service-' + serviceId)
@@ -570,8 +618,6 @@ const scrollToServiceCard = (serviceId: string) => {
       }
 
       if (cardEl && container) {
-        pauseServiceMarqueeTemporarily(7000)
-
         const cardOffset = cardEl.offsetLeft
         const cardWidth = cardEl.offsetWidth
         const containerWidth = container.offsetWidth
@@ -585,7 +631,7 @@ const scrollToServiceCard = (serviceId: string) => {
         cardEl.classList.add('ring-4', 'ring-blue-500', 'shadow-2xl', 'scale-[1.02]', 'transition-all', 'duration-300')
         setTimeout(() => {
           cardEl.classList.remove('ring-4', 'ring-blue-500', 'shadow-2xl', 'scale-[1.02]')
-        }, 4000)
+        }, 5000)
       }
     }, 280)
   })
@@ -671,10 +717,11 @@ const findServiceByShortcutOrId = (token: string): ServiceItem | undefined => {
 // Handle Direct URL hash, query parameters, and /p/:slug paths
 const handleUrlHashOrQuery = () => {
   const hash = window.location.hash.toLowerCase()
+  const rawHash = hash.replace(/^#/, '').trim()
   const searchParams = new URLSearchParams(window.location.search)
-  const catParam = searchParams.get('category') || searchParams.get('cat') || ''
-  const prodParam = searchParams.get('product') || searchParams.get('p') || ''
-  const serviceParam = searchParams.get('service') || searchParams.get('s') || ''
+  const catParam = (searchParams.get('category') || searchParams.get('cat') || '').toLowerCase().trim()
+  const prodParam = (searchParams.get('product') || searchParams.get('p') || '').toLowerCase().trim()
+  const serviceParam = (searchParams.get('service') || searchParams.get('s') || '').toLowerCase().trim()
 
   // Check if opened via /p/:slug path
   const pathname = window.location.pathname.toLowerCase()
@@ -683,11 +730,144 @@ const handleUrlHashOrQuery = () => {
     pathSlug = pathname.split('/p/')[1]?.replace(/\.html$/, '')?.trim() || ''
   }
 
-  const rawHash = hash.replace(/^#/, '').trim()
+  // Set of known general category hashes
+  const KNOWN_CATEGORY_HASHES = new Set([
+    'semua-produk-pull-store', 'semua', 'katalog-produk', 'all',
+    'ai', 'edit', 'rating', 'streaming',
+    'semua-jasa-pull-store', 'semua-jasa', 'jasa-software', 'jasa', 'software',
+    'tugas-akhir', 'skripsi', 'ta', 'mahasiswa',
+    'aplikasi-kasir', 'kasir', 'apk-offline', 'kasir-offline',
+    'website-statis', 'web-statis', 'landing-page',
+    'website-dinamis', 'web-dinamis', 'cms',
+    'sistem-kustom', 'custom-web', 'sistem'
+  ])
+
+  // If the user navigated directly to a general category hash, give that absolute priority
+  // and release any previous card lock, while stripping old query parameters like ?product=...
+  const isExplicitCategoryHash = KNOWN_CATEGORY_HASHES.has(rawHash)
+
+  if (isExplicitCategoryHash) {
+    activeTargetCardId.value = null
+    activeTargetServiceId.value = null
+
+    // Strip leftover queries from address bar
+    if (window.location.search) {
+      history.replaceState(null, '', window.location.pathname + hash)
+    }
+
+    // 1. Digital product categories
+    if (['streaming'].includes(rawHash)) {
+      currentTab.value = 'digital'
+      digitalFilter.value = 'streaming'
+      nextTick(() => {
+        document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' })
+        initInfinitePosition()
+      })
+      return
+    }
+    if (['rating'].includes(rawHash)) {
+      currentTab.value = 'digital'
+      digitalFilter.value = 'rating'
+      nextTick(() => {
+        document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' })
+        initInfinitePosition()
+      })
+      return
+    }
+    if (['edit'].includes(rawHash)) {
+      currentTab.value = 'digital'
+      digitalFilter.value = 'edit'
+      nextTick(() => {
+        document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' })
+        initInfinitePosition()
+      })
+      return
+    }
+    if (['ai'].includes(rawHash)) {
+      currentTab.value = 'digital'
+      digitalFilter.value = 'ai'
+      nextTick(() => {
+        document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' })
+        initInfinitePosition()
+      })
+      return
+    }
+    if (['semua-produk-pull-store', 'semua', 'katalog-produk', 'all'].includes(rawHash)) {
+      currentTab.value = 'digital'
+      digitalFilter.value = 'all'
+      nextTick(() => {
+        document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' })
+        initInfinitePosition()
+      })
+      return
+    }
+
+    // 2. Service categories
+    if (['tugas-akhir', 'skripsi', 'ta', 'mahasiswa'].includes(rawHash)) {
+      currentTab.value = 'services'
+      serviceFilter.value = 'tugas-akhir'
+      nextTick(() => {
+        const el = document.getElementById('tugas-akhir') || document.getElementById('semua-jasa-pull-store') || document.getElementById('katalog-section')
+        el?.scrollIntoView({ behavior: 'smooth' })
+        initInfiniteServicePosition()
+      })
+      return
+    }
+    if (['aplikasi-kasir', 'kasir', 'apk-offline', 'kasir-offline'].includes(rawHash)) {
+      currentTab.value = 'services'
+      serviceFilter.value = 'apk-offline'
+      nextTick(() => {
+        const el = document.getElementById('aplikasi-kasir') || document.getElementById('semua-jasa-pull-store') || document.getElementById('katalog-section')
+        el?.scrollIntoView({ behavior: 'smooth' })
+        initInfiniteServicePosition()
+      })
+      return
+    }
+    if (['website-statis', 'web-statis', 'landing-page'].includes(rawHash)) {
+      currentTab.value = 'services'
+      serviceFilter.value = 'landing-page'
+      nextTick(() => {
+        const el = document.getElementById('website-statis') || document.getElementById('semua-jasa-pull-store') || document.getElementById('katalog-section')
+        el?.scrollIntoView({ behavior: 'smooth' })
+        initInfiniteServicePosition()
+      })
+      return
+    }
+    if (['website-dinamis', 'web-dinamis', 'cms'].includes(rawHash)) {
+      currentTab.value = 'services'
+      serviceFilter.value = 'web-dinamis'
+      nextTick(() => {
+        const el = document.getElementById('website-dinamis') || document.getElementById('semua-jasa-pull-store') || document.getElementById('katalog-section')
+        el?.scrollIntoView({ behavior: 'smooth' })
+        initInfiniteServicePosition()
+      })
+      return
+    }
+    if (['sistem-kustom', 'custom-web', 'sistem'].includes(rawHash)) {
+      currentTab.value = 'services'
+      serviceFilter.value = 'custom-web'
+      nextTick(() => {
+        const el = document.getElementById('sistem-kustom') || document.getElementById('semua-jasa-pull-store') || document.getElementById('katalog-section')
+        el?.scrollIntoView({ behavior: 'smooth' })
+        initInfiniteServicePosition()
+      })
+      return
+    }
+    if (['semua-jasa-pull-store', 'semua-jasa', 'jasa-software', 'jasa', 'software'].includes(rawHash)) {
+      currentTab.value = 'services'
+      serviceFilter.value = 'all'
+      nextTick(() => {
+        const el = document.getElementById('semua-jasa-pull-store') || document.getElementById('katalog-section')
+        el?.scrollIntoView({ behavior: 'smooth' })
+        initInfiniteServicePosition()
+      })
+      return
+    }
+  }
 
   // Priority 1: Check if target is a Product
   const productCandidate = prodParam || (hash.startsWith('#product-') ? rawHash : (pathSlug || rawHash))
-  if (productCandidate && !['all', 'semua', 'semua-produk-pull-store', 'semua-jasa-pull-store', 'software'].includes(productCandidate)) {
+  if (productCandidate && !KNOWN_CATEGORY_HASHES.has(productCandidate)) {
     const targetProd = findProductByShortcutOrId(productCandidate)
     if (targetProd) {
       currentTab.value = 'digital'
@@ -699,7 +879,7 @@ const handleUrlHashOrQuery = () => {
 
   // Priority 2: Check if target is a Service
   const serviceCandidate = serviceParam || (hash.startsWith('#service-') ? rawHash : (pathSlug || rawHash))
-  if (serviceCandidate) {
+  if (serviceCandidate && !KNOWN_CATEGORY_HASHES.has(serviceCandidate)) {
     const targetSvc = findServiceByShortcutOrId(serviceCandidate)
     if (targetSvc) {
       currentTab.value = 'services'
@@ -709,181 +889,97 @@ const handleUrlHashOrQuery = () => {
     }
   }
 
-  // Priority 3: Service category hashes
-  if (
-    hash === '#tugas-akhir' ||
-    hash === '#skripsi' ||
-    hash === '#ta' ||
-    hash === '#mahasiswa' ||
-    catParam === 'tugas-akhir' ||
-    catParam === 'skripsi'
-  ) {
-    currentTab.value = 'services'
-    serviceFilter.value = 'tugas-akhir'
-    nextTick(() => {
-      const el = document.getElementById('tugas-akhir') || document.getElementById('semua-jasa-pull-store') || document.getElementById('katalog-section')
-      el?.scrollIntoView({ behavior: 'smooth' })
-    })
-    return
-  }
-
-  if (
-    hash === '#aplikasi-kasir' ||
-    hash === '#kasir' ||
-    hash === '#apk-offline' ||
-    hash === '#kasir-offline' ||
-    catParam === 'aplikasi-kasir' ||
-    catParam === 'apk-offline'
-  ) {
-    currentTab.value = 'services'
-    serviceFilter.value = 'apk-offline'
-    nextTick(() => {
-      const el = document.getElementById('aplikasi-kasir') || document.getElementById('semua-jasa-pull-store') || document.getElementById('katalog-section')
-      el?.scrollIntoView({ behavior: 'smooth' })
-    })
-    return
-  }
-
-  if (
-    hash === '#website-statis' ||
-    hash === '#web-statis' ||
-    hash === '#landing-page' ||
-    catParam === 'website-statis' ||
-    catParam === 'landing-page'
-  ) {
-    currentTab.value = 'services'
-    serviceFilter.value = 'landing-page'
-    nextTick(() => {
-      const el = document.getElementById('website-statis') || document.getElementById('semua-jasa-pull-store') || document.getElementById('katalog-section')
-      el?.scrollIntoView({ behavior: 'smooth' })
-    })
-    return
-  }
-
-  if (
-    hash === '#website-dinamis' ||
-    hash === '#web-dinamis' ||
-    hash === '#cms' ||
-    catParam === 'website-dinamis' ||
-    catParam === 'web-dinamis'
-  ) {
-    currentTab.value = 'services'
-    serviceFilter.value = 'web-dinamis'
-    nextTick(() => {
-      const el = document.getElementById('website-dinamis') || document.getElementById('semua-jasa-pull-store') || document.getElementById('katalog-section')
-      el?.scrollIntoView({ behavior: 'smooth' })
-    })
-    return
-  }
-
-  if (
-    hash === '#sistem-kustom' ||
-    hash === '#custom-web' ||
-    hash === '#sistem' ||
-    catParam === 'sistem-kustom' ||
-    catParam === 'custom-web'
-  ) {
-    currentTab.value = 'services'
-    serviceFilter.value = 'custom-web'
-    nextTick(() => {
-      const el = document.getElementById('sistem-kustom') || document.getElementById('semua-jasa-pull-store') || document.getElementById('katalog-section')
-      el?.scrollIntoView({ behavior: 'smooth' })
-    })
-    return
-  }
-
-  if (
-    hash === '#semua-jasa-pull-store' ||
-    hash === '#semua-jasa' ||
-    hash === '#jasa-software' ||
-    hash === '#jasa' ||
-    hash === '#software' ||
-    catParam === 'semua-jasa-pull-store' ||
-    catParam === 'services'
-  ) {
-    currentTab.value = 'services'
-    serviceFilter.value = 'all'
-    nextTick(() => {
-      const el = document.getElementById('semua-jasa-pull-store') || document.getElementById('katalog-section')
-      el?.scrollIntoView({ behavior: 'smooth' })
-    })
-    return
-  }
-
-  // Priority 4: Digital product category hashes
-  if (
-    hash === '#semua-produk-pull-store' || 
-    hash === '#semua' || 
-    hash === '#katalog-produk' || 
-    catParam === 'semua-produk-pull-store' || 
-    catParam === 'all'
-  ) {
-    currentTab.value = 'digital'
-    digitalFilter.value = 'all'
-    nextTick(() => {
-      const el = document.getElementById('katalog-section')
-      el?.scrollIntoView({ behavior: 'smooth' })
-    })
-    return
-  }
-
-  if (hash === '#ai' || catParam === 'ai') {
-    currentTab.value = 'digital'
-    digitalFilter.value = 'ai'
-    nextTick(() => {
-      const el = document.getElementById('katalog-section')
-      el?.scrollIntoView({ behavior: 'smooth' })
-    })
-    return
-  }
-
-  if (hash === '#edit' || catParam === 'edit') {
-    currentTab.value = 'digital'
-    digitalFilter.value = 'edit'
-    nextTick(() => {
-      const el = document.getElementById('katalog-section')
-      el?.scrollIntoView({ behavior: 'smooth' })
-    })
-    return
-  }
-
-  if (hash === '#rating' || catParam === 'rating') {
-    currentTab.value = 'digital'
-    digitalFilter.value = 'rating'
-    nextTick(() => {
-      const el = document.getElementById('katalog-section')
-      el?.scrollIntoView({ behavior: 'smooth' })
-    })
-    return
-  }
-
-  if (hash === '#streaming' || catParam === 'streaming') {
-    currentTab.value = 'digital'
-    digitalFilter.value = 'streaming'
-    nextTick(() => {
-      const el = document.getElementById('katalog-section')
-      el?.scrollIntoView({ behavior: 'smooth' })
-    })
-    return
+  // Priority 3: Fallback query param categories
+  if (catParam) {
+    activeTargetCardId.value = null
+    activeTargetServiceId.value = null
+    if (['tugas-akhir', 'skripsi'].includes(catParam)) {
+      currentTab.value = 'services'
+      serviceFilter.value = 'tugas-akhir'
+      nextTick(() => { document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' }) })
+      return
+    }
+    if (['aplikasi-kasir', 'apk-offline'].includes(catParam)) {
+      currentTab.value = 'services'
+      serviceFilter.value = 'apk-offline'
+      nextTick(() => { document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' }) })
+      return
+    }
+    if (['website-statis', 'landing-page'].includes(catParam)) {
+      currentTab.value = 'services'
+      serviceFilter.value = 'landing-page'
+      nextTick(() => { document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' }) })
+      return
+    }
+    if (['website-dinamis', 'web-dinamis'].includes(catParam)) {
+      currentTab.value = 'services'
+      serviceFilter.value = 'web-dinamis'
+      nextTick(() => { document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' }) })
+      return
+    }
+    if (['sistem-kustom', 'custom-web'].includes(catParam)) {
+      currentTab.value = 'services'
+      serviceFilter.value = 'custom-web'
+      nextTick(() => { document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' }) })
+      return
+    }
+    if (['semua-jasa-pull-store', 'services'].includes(catParam)) {
+      currentTab.value = 'services'
+      serviceFilter.value = 'all'
+      nextTick(() => { document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' }) })
+      return
+    }
+    if (['ai'].includes(catParam)) {
+      currentTab.value = 'digital'
+      digitalFilter.value = 'ai'
+      nextTick(() => { document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' }) })
+      return
+    }
+    if (['edit'].includes(catParam)) {
+      currentTab.value = 'digital'
+      digitalFilter.value = 'edit'
+      nextTick(() => { document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' }) })
+      return
+    }
+    if (['rating'].includes(catParam)) {
+      currentTab.value = 'digital'
+      digitalFilter.value = 'rating'
+      nextTick(() => { document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' }) })
+      return
+    }
+    if (['streaming'].includes(catParam)) {
+      currentTab.value = 'digital'
+      digitalFilter.value = 'streaming'
+      nextTick(() => { document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' }) })
+      return
+    }
   }
 }
 
 // Watch live products/services changes from Supabase to re-target card once data loads
 watch(() => products.value, () => {
   nextTick(() => {
-    handleUrlHashOrQuery()
+    if (activeTargetCardId.value) {
+      scrollToProductCard(activeTargetCardId.value)
+    } else {
+      handleUrlHashOrQuery()
+    }
   })
 })
 
 watch(() => services.value, () => {
   nextTick(() => {
-    handleUrlHashOrQuery()
+    if (activeTargetServiceId.value) {
+      scrollToServiceCard(activeTargetServiceId.value)
+    } else {
+      handleUrlHashOrQuery()
+    }
   })
 })
 
 const handleWindowResize = () => {
-  initInfinitePosition()
-  initInfiniteServicePosition()
+  if (!activeTargetCardId.value) initInfinitePosition()
+  if (!activeTargetServiceId.value) initInfiniteServicePosition()
 }
 
 onMounted(() => {
@@ -891,8 +987,8 @@ onMounted(() => {
   window.addEventListener('hashchange', handleUrlHashOrQuery)
   window.addEventListener('resize', handleWindowResize)
   nextTick(() => {
-    initInfinitePosition()
-    initInfiniteServicePosition()
+    if (!activeTargetCardId.value) initInfinitePosition()
+    if (!activeTargetServiceId.value) initInfiniteServicePosition()
   })
   marqueeRafId = requestAnimationFrame(stepMarquee)
 })
@@ -908,18 +1004,17 @@ onUnmounted(() => {
 const setMainTab = (tab: 'digital' | 'services') => {
   currentTab.value = tab
   searchQuery.value = ''
+  activeTargetCardId.value = null
+  activeTargetServiceId.value = null
   if (tab === 'digital') {
-    if (digitalFilter.value === 'all') {
-      history.replaceState(null, '', '#semua-produk-pull-store')
-    } else {
-      history.replaceState(null, '', `#${digitalFilter.value}`)
-    }
+    const targetHash = digitalFilter.value === 'all' ? '#semua-produk-pull-store' : `#${digitalFilter.value}`
+    history.replaceState(null, '', window.location.pathname + targetHash)
     nextTick(() => {
       initInfinitePosition()
     })
   } else {
     const targetHash = serviceHashMap[serviceFilter.value] || '#semua-jasa-pull-store'
-    history.replaceState(null, '', targetHash)
+    history.replaceState(null, '', window.location.pathname + targetHash)
     nextTick(() => {
       initInfiniteServicePosition()
     })
