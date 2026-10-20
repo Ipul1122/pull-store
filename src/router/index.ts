@@ -18,6 +18,11 @@ const routes = [
     component: HomeView
   },
   {
+    path: '/p/:slug',
+    name: 'ProductDirectShare',
+    component: HomeView
+  },
+  {
     path: '/testimonials',
     name: 'Testimonials',
     component: TestimonialsView

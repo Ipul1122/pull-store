@@ -21,7 +21,7 @@ function escapeXml(unsafe) {
 const ITEMS = [
   {
     slug: 'netflix',
-    aliases: ['netflix-2u', 'netflix-1u', 'streaming-netflix'],
+    aliases: ['netflix-2u', 'netflix-1u', 'netflix-1p-1u', 'netflix-1p-2u', 'streaming-netflix'],
     title: 'Netflix Premium 4K UHD',
     subtitle: 'Nonton film & series sepuasnya tanpa batas. Akun resmi & bergaransi penuh.',
     priceText: 'Mulai Rp 6.000 / bln',
@@ -32,7 +32,7 @@ const ITEMS = [
   },
   {
     slug: 'spotify',
-    aliases: ['spotify-premium', 'streaming-spotify'],
+    aliases: ['spotify-premium', 'spotify-individual', 'streaming-spotify'],
     title: 'Spotify Premium Famplan',
     subtitle: 'Musik tanpa jeda iklan, download offline, & audio kualitas ultra jernih.',
     priceText: 'Rp 20.000 / Bulan',
@@ -50,7 +50,7 @@ const ITEMS = [
     accentColor: '#10a37f',
     logoPath: 'src/assets/AI/chatgpt.svg',
     badges: ['Garansi Replace Penuh', 'Model GPT-4o Terbaru', 'Anti Limit & Cepat'],
-    targetHash: '#ai',
+    targetHash: '#chatgpt',
   },
   {
     slug: 'claude',
@@ -61,18 +61,18 @@ const ITEMS = [
     accentColor: '#d97706',
     logoPath: 'src/assets/AI/claude.svg',
     badges: ['Model 3.5 Sonnet', 'Garansi Penuh 30 Hari', 'Private & Aman'],
-    targetHash: '#ai',
+    targetHash: '#claude',
   },
   {
     slug: 'gemini',
-    aliases: ['gemini-ai-5tb', 'head-gemini-5tb', 'ai-gemini'],
+    aliases: ['gemini-ai-5tb', 'gemini-advance-5tb', 'head-gemini-5tb', 'ai-gemini'],
     title: 'Gemini Advanced + 5TB Cloud',
     subtitle: 'Google One AI Premium + Penyimpanan Google Drive super lega 5.000 GB.',
     priceText: 'Mulai Rp 25.000',
     accentColor: '#2563eb',
     logoPath: 'src/assets/AI/gemini.svg',
     badges: ['Cloud Jumbo 5TB', 'Gemini Advanced 2.0', 'Invite Email Sendiri'],
-    targetHash: '#ai',
+    targetHash: '#gemini',
   },
   {
     slug: 'canva',
@@ -83,7 +83,7 @@ const ITEMS = [
     accentColor: '#00c4cc',
     logoPath: 'src/assets/edit/canva.svg',
     badges: ['Garansi Sesuai Durasi', 'Email Pribadi Pembeli', 'Unlock Semua Fitur Pro'],
-    targetHash: '#edit',
+    targetHash: '#canva',
   },
   {
     slug: 'capcut',
@@ -94,7 +94,7 @@ const ITEMS = [
     accentColor: '#8b5cf6',
     logoPath: 'src/assets/edit/capcut.svg',
     badges: ['Garansi Replace 1x', 'Support PC & HP', 'Cloud Space 100GB'],
-    targetHash: '#edit',
+    targetHash: '#capcut',
   },
   {
     slug: 'google-maps',
@@ -105,7 +105,7 @@ const ITEMS = [
     accentColor: '#ea4335',
     logoPath: 'src/assets/rating/google-maps.svg',
     badges: ['Akun Real & Lokal', 'Anti Drop & Permanen', 'Garansi Re-review'],
-    targetHash: '#rating',
+    targetHash: '#google-maps',
   },
   {
     slug: 'zoom',
@@ -288,6 +288,11 @@ async function generateOGImagesAndPages() {
       const htmlPath = path.join(publicPDir, `${s}.html`);
       const ogImageUrl = `/og/${ogFileName}`;
 
+      const isService = ['software', 'tugas-akhir', 'skripsi', 'svc-tugas-akhir', 'svc-landing-page', 'svc-apk-kasir', 'svc-custom-web'].includes(s) || item.slug === 'software';
+      const redirectTarget = item.slug === 'pull-store' 
+        ? '/#semua-produk-pull-store' 
+        : (isService ? `/?service=${s}#${s}` : `/?product=${s}#${s}`);
+
       const htmlContent = `<!DOCTYPE html>
 <html lang="id">
 <head>
@@ -312,15 +317,15 @@ async function generateOGImagesAndPages() {
   <meta name="twitter:image" content="${ogImageUrl}">
 
   <!-- Instant Browser Redirect -->
-  <meta http-equiv="refresh" content="0; url=/${item.targetHash}">
+  <meta http-equiv="refresh" content="0; url=${redirectTarget}">
   <script>
-    window.location.replace('/${item.targetHash}');
+    window.location.replace('${redirectTarget}');
   </script>
 </head>
 <body style="font-family: system-ui, sans-serif; background: #09090b; color: #f4f4f5; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center;">
   <div>
     <h2>Membuka ${escapeXml(item.title)} di Pull Store...</h2>
-    <p style="color: #a1a1aa;">Jika halaman tidak berpindah otomatis, <a href="/${item.targetHash}" style="color: #3b82f6;">klik di sini</a>.</p>
+    <p style="color: #a1a1aa;">Jika halaman tidak berpindah otomatis, <a href="${redirectTarget}" style="color: #3b82f6;">klik di sini</a>.</p>
   </div>
 </body>
 </html>`;

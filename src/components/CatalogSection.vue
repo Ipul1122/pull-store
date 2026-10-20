@@ -521,95 +521,207 @@ const copyAiCategoryLink = async () => {
   }
 }
 
-// Handle Direct URL hash or query parameters (e.g. #aplikasi-kasir, #website-statis, #website-dinamis, #ai, ?category=...)
+// Smooth scroll & highlight targeted product card in carousel
+const scrollToProductCard = (productId: string) => {
+  nextTick(() => {
+    setTimeout(() => {
+      const cardEl = document.getElementById('product-' + productId)
+      const container = productCarouselRef.value
+      const sectionEl = document.getElementById('katalog-section')
+
+      if (sectionEl) {
+        sectionEl.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+
+      if (cardEl && container) {
+        pauseMarqueeTemporarily(7000)
+
+        // Center the card horizontally inside carousel track
+        const cardOffset = cardEl.offsetLeft
+        const cardWidth = cardEl.offsetWidth
+        const containerWidth = container.offsetWidth
+        const targetScrollLeft = cardOffset - (containerWidth / 2) + (cardWidth / 2)
+
+        container.scrollTo({
+          left: Math.max(0, targetScrollLeft),
+          behavior: 'smooth'
+        })
+
+        // Glowing focus ring
+        cardEl.classList.add('ring-4', 'ring-blue-500', 'shadow-2xl', 'scale-[1.02]', 'transition-all', 'duration-300')
+        setTimeout(() => {
+          cardEl.classList.remove('ring-4', 'ring-blue-500', 'shadow-2xl', 'scale-[1.02]')
+        }, 4000)
+      }
+    }, 280)
+  })
+}
+
+// Smooth scroll & highlight targeted service card in carousel
+const scrollToServiceCard = (serviceId: string) => {
+  nextTick(() => {
+    setTimeout(() => {
+      const cardEl = document.getElementById('service-' + serviceId)
+      const container = serviceCarouselRef.value
+      const sectionEl = document.getElementById('semua-jasa-pull-store') || document.getElementById('katalog-section')
+
+      if (sectionEl) {
+        sectionEl.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+
+      if (cardEl && container) {
+        pauseServiceMarqueeTemporarily(7000)
+
+        const cardOffset = cardEl.offsetLeft
+        const cardWidth = cardEl.offsetWidth
+        const containerWidth = container.offsetWidth
+        const targetScrollLeft = cardOffset - (containerWidth / 2) + (cardWidth / 2)
+
+        container.scrollTo({
+          left: Math.max(0, targetScrollLeft),
+          behavior: 'smooth'
+        })
+
+        cardEl.classList.add('ring-4', 'ring-blue-500', 'shadow-2xl', 'scale-[1.02]', 'transition-all', 'duration-300')
+        setTimeout(() => {
+          cardEl.classList.remove('ring-4', 'ring-blue-500', 'shadow-2xl', 'scale-[1.02]')
+        }, 4000)
+      }
+    }, 280)
+  })
+}
+
+// Universal product finder supporting exact IDs, shortcuts, and fuzzy names
+const findProductByShortcutOrId = (token: string): ProductItem | undefined => {
+  if (!token) return undefined
+  const clean = token.toLowerCase().replace(/^(product-|#)/, '').replace(/\.html$/, '').trim()
+
+  // 1. Exact ID
+  let found = products.value.find((p: ProductItem) => p.id.toLowerCase() === clean)
+  if (found) return found
+
+  // 2. Keyword mapping
+  const keywordMap: Record<string, string> = {
+    'netflix': 'netflix',
+    'spotify': 'spotify',
+    'chatgpt': 'chatgpt',
+    'claude': 'claude',
+    'gemini': 'gemini',
+    'canva': 'canva',
+    'capcut': 'capcut',
+    'google-maps': 'gmaps',
+    'maps': 'gmaps',
+    'rating': 'gmaps',
+    'zoom': 'zoom',
+    'youtube': 'youtube',
+    'vidio': 'vidio'
+  }
+  const kw = keywordMap[clean] || clean
+
+  // 3. Substring match in ID or Name
+  found = products.value.find((p: ProductItem) => {
+    const pId = p.id.toLowerCase()
+    const pName = p.name.toLowerCase()
+    return pId.includes(kw) || pName.includes(kw)
+  })
+  return found
+}
+
+// Universal service finder
+const findServiceByShortcutOrId = (token: string): ServiceItem | undefined => {
+  if (!token) return undefined
+  const clean = token.toLowerCase().replace(/^(service-|#)/, '').replace(/\.html$/, '').trim()
+
+  // 1. Exact ID
+  let found = services.value.find((s: ServiceItem) => s.id.toLowerCase() === clean)
+  if (found) return found
+
+  // 2. Keyword mapping
+  const serviceKeywords: Record<string, string> = {
+    'tugas-akhir': 'tugas-akhir',
+    'skripsi': 'tugas-akhir',
+    'ta': 'tugas-akhir',
+    'mahasiswa': 'tugas-akhir',
+    'software': 'tugas-akhir',
+    'apk-kasir': 'apk-kasir',
+    'kasir': 'apk-kasir',
+    'kasir-offline': 'apk-kasir',
+    'apk-offline': 'apk-kasir',
+    'landing-page': 'website-statis',
+    'statis': 'website-statis',
+    'website-statis': 'website-statis',
+    'web-dinamis': 'website-dinamis',
+    'dinamis': 'website-dinamis',
+    'cms': 'website-dinamis',
+    'custom': 'custom-web',
+    'custom-web': 'custom-web',
+    'sistem-kustom': 'custom-web'
+  }
+  const kw = serviceKeywords[clean] || clean
+
+  // 3. Substring match in ID or Name
+  found = services.value.find((s: ServiceItem) => {
+    const sId = s.id.toLowerCase()
+    const sName = s.name.toLowerCase()
+    return sId.includes(kw) || sName.includes(kw)
+  })
+  return found
+}
+
+// Handle Direct URL hash, query parameters, and /p/:slug paths
 const handleUrlHashOrQuery = () => {
   const hash = window.location.hash.toLowerCase()
   const searchParams = new URLSearchParams(window.location.search)
-  const catParam = searchParams.get('category') || searchParams.get('cat')
-  const prodParam = searchParams.get('product')
-  const serviceParam = searchParams.get('service')
+  const catParam = searchParams.get('category') || searchParams.get('cat') || ''
+  const prodParam = searchParams.get('product') || searchParams.get('p') || ''
+  const serviceParam = searchParams.get('service') || searchParams.get('s') || ''
 
-  // Direct product shortcut mapping (e.g. #netflix, #spotify, #chatgpt)
-  const productShortcutMap: Record<string, string> = {
-    'netflix': 'netflix-2u',
-    'spotify': 'spotify-premium',
-    'chatgpt': 'chatgpt-plus-shared',
-    'claude': 'claude-ai-pro',
-    'gemini': 'gemini-ai-5tb',
-    'canva': 'canva-pro-member',
-    'capcut': 'capcut-pro',
-    'google-maps': 'gmaps-rating-bintang',
-    'zoom': 'zoom-premium',
-    'youtube': 'youtube-premium',
-    'vidio': 'vidio-platinum-mobile'
+  // Check if opened via /p/:slug path
+  const pathname = window.location.pathname.toLowerCase()
+  let pathSlug = ''
+  if (pathname.includes('/p/')) {
+    pathSlug = pathname.split('/p/')[1]?.replace(/\.html$/, '')?.trim() || ''
   }
 
-  const rawHash = hash.replace(/^#/, '')
-  const resolvedTargetId = prodParam || (hash.startsWith('#product-') ? hash.replace('#product-', '') : productShortcutMap[rawHash])
+  const rawHash = hash.replace(/^#/, '').trim()
 
-  if (resolvedTargetId) {
-    const targetProd = products.value.find((p: ProductItem) => p.id === resolvedTargetId)
+  // Priority 1: Check if target is a Product
+  const productCandidate = prodParam || (hash.startsWith('#product-') ? rawHash : (pathSlug || rawHash))
+  if (productCandidate && !['all', 'semua', 'semua-produk-pull-store', 'semua-jasa-pull-store', 'software'].includes(productCandidate)) {
+    const targetProd = findProductByShortcutOrId(productCandidate)
     if (targetProd) {
       currentTab.value = 'digital'
       digitalFilter.value = targetProd.category
-      nextTick(() => {
-        setTimeout(() => {
-          const cardEl = document.getElementById('product-' + targetProd.id)
-          if (cardEl) {
-            cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
-            cardEl.classList.add('ring-4', 'ring-blue-500/60', 'transition-all')
-            setTimeout(() => {
-              cardEl.classList.remove('ring-4', 'ring-blue-500/60')
-            }, 3000)
-          }
-        }, 200)
-      })
+      scrollToProductCard(targetProd.id)
       return
     }
   }
 
-  // Direct Service Target / Shortcut
-  const serviceShortcutMap: Record<string, { id: string; filter: typeof serviceFilter.value }> = {
-    'svc-apk-kasir-offline': { id: 'svc-apk-kasir-offline', filter: 'apk-offline' },
-    'svc-website-statis': { id: 'svc-website-statis', filter: 'landing-page' },
-    'svc-website-dinamis': { id: 'svc-website-dinamis', filter: 'web-dinamis' },
-    'svc-custom-web': { id: 'svc-custom-web', filter: 'custom-web' }
+  // Priority 2: Check if target is a Service
+  const serviceCandidate = serviceParam || (hash.startsWith('#service-') ? rawHash : (pathSlug || rawHash))
+  if (serviceCandidate) {
+    const targetSvc = findServiceByShortcutOrId(serviceCandidate)
+    if (targetSvc) {
+      currentTab.value = 'services'
+      serviceFilter.value = targetSvc.category
+      scrollToServiceCard(targetSvc.id)
+      return
+    }
   }
 
-  const resolvedServiceId = serviceParam || (hash.startsWith('#service-') ? hash.replace('#service-', '') : '')
-  if (resolvedServiceId && serviceShortcutMap[resolvedServiceId]) {
-    const conf = serviceShortcutMap[resolvedServiceId]
-    currentTab.value = 'services'
-    serviceFilter.value = conf.filter
-    nextTick(() => {
-      setTimeout(() => {
-        const cardEl = document.getElementById('service-' + conf.id)
-        if (cardEl) {
-          cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
-          cardEl.classList.add('ring-4', 'ring-blue-500/60', 'transition-all')
-          setTimeout(() => {
-            cardEl.classList.remove('ring-4', 'ring-blue-500/60')
-          }, 3000)
-        }
-      }, 200)
-    })
-    return
-  }
-
-  // --- Filter Jasa Software Dev ---
+  // Priority 3: Service category hashes
   if (
     hash === '#tugas-akhir' ||
     hash === '#skripsi' ||
     hash === '#ta' ||
     hash === '#mahasiswa' ||
-    hash === '#jasa-skripsi' ||
     catParam === 'tugas-akhir' ||
     catParam === 'skripsi'
   ) {
     currentTab.value = 'services'
     serviceFilter.value = 'tugas-akhir'
     nextTick(() => {
-      const el = document.getElementById('tugas-akhir') || document.getElementById('katalog-section')
+      const el = document.getElementById('tugas-akhir') || document.getElementById('semua-jasa-pull-store') || document.getElementById('katalog-section')
       el?.scrollIntoView({ behavior: 'smooth' })
     })
     return
@@ -620,15 +732,13 @@ const handleUrlHashOrQuery = () => {
     hash === '#kasir' ||
     hash === '#apk-offline' ||
     hash === '#kasir-offline' ||
-    hash === '#apk-kasir' ||
-    hash === '#aplikasi-kasir-offline' ||
     catParam === 'aplikasi-kasir' ||
     catParam === 'apk-offline'
   ) {
     currentTab.value = 'services'
     serviceFilter.value = 'apk-offline'
     nextTick(() => {
-      const el = document.getElementById('aplikasi-kasir') || document.getElementById('katalog-section')
+      const el = document.getElementById('aplikasi-kasir') || document.getElementById('semua-jasa-pull-store') || document.getElementById('katalog-section')
       el?.scrollIntoView({ behavior: 'smooth' })
     })
     return
@@ -638,14 +748,13 @@ const handleUrlHashOrQuery = () => {
     hash === '#website-statis' ||
     hash === '#web-statis' ||
     hash === '#landing-page' ||
-    hash === '#statis' ||
     catParam === 'website-statis' ||
     catParam === 'landing-page'
   ) {
     currentTab.value = 'services'
     serviceFilter.value = 'landing-page'
     nextTick(() => {
-      const el = document.getElementById('website-statis') || document.getElementById('katalog-section')
+      const el = document.getElementById('website-statis') || document.getElementById('semua-jasa-pull-store') || document.getElementById('katalog-section')
       el?.scrollIntoView({ behavior: 'smooth' })
     })
     return
@@ -654,7 +763,6 @@ const handleUrlHashOrQuery = () => {
   if (
     hash === '#website-dinamis' ||
     hash === '#web-dinamis' ||
-    hash === '#dinamis' ||
     hash === '#cms' ||
     catParam === 'website-dinamis' ||
     catParam === 'web-dinamis'
@@ -662,7 +770,7 @@ const handleUrlHashOrQuery = () => {
     currentTab.value = 'services'
     serviceFilter.value = 'web-dinamis'
     nextTick(() => {
-      const el = document.getElementById('website-dinamis') || document.getElementById('katalog-section')
+      const el = document.getElementById('website-dinamis') || document.getElementById('semua-jasa-pull-store') || document.getElementById('katalog-section')
       el?.scrollIntoView({ behavior: 'smooth' })
     })
     return
@@ -672,14 +780,13 @@ const handleUrlHashOrQuery = () => {
     hash === '#sistem-kustom' ||
     hash === '#custom-web' ||
     hash === '#sistem' ||
-    hash === '#custom' ||
     catParam === 'sistem-kustom' ||
     catParam === 'custom-web'
   ) {
     currentTab.value = 'services'
     serviceFilter.value = 'custom-web'
     nextTick(() => {
-      const el = document.getElementById('sistem-kustom') || document.getElementById('katalog-section')
+      const el = document.getElementById('sistem-kustom') || document.getElementById('semua-jasa-pull-store') || document.getElementById('katalog-section')
       el?.scrollIntoView({ behavior: 'smooth' })
     })
     return
@@ -703,7 +810,7 @@ const handleUrlHashOrQuery = () => {
     return
   }
 
-  // --- Filter Produk Digital ---
+  // Priority 4: Digital product category hashes
   if (
     hash === '#semua-produk-pull-store' || 
     hash === '#semua' || 
@@ -760,6 +867,19 @@ const handleUrlHashOrQuery = () => {
     return
   }
 }
+
+// Watch live products/services changes from Supabase to re-target card once data loads
+watch(() => products.value, () => {
+  nextTick(() => {
+    handleUrlHashOrQuery()
+  })
+})
+
+watch(() => services.value, () => {
+  nextTick(() => {
+    handleUrlHashOrQuery()
+  })
+})
 
 const handleWindowResize = () => {
   initInfinitePosition()

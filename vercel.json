@@ -1,7 +1,16 @@
 {
+  "cleanUrls": false,
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/p/:path*",
+      "destination": "/p/:path*"
+    },
+    {
+      "source": "/og/:path*",
+      "destination": "/og/:path*"
+    },
+    {
+      "source": "/((?!p/|og/|assets/|favicon|.*\\..*).*)",
       "destination": "/index.html"
     }
   ]
