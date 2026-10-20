@@ -6,23 +6,7 @@ import ProductCard from './ProductCard.vue'
 import ServiceCard from './ServiceCard.vue'
 import ProductCardSkeleton from './skeletons/ProductCardSkeleton.vue'
 import ServiceCardSkeleton from './skeletons/ServiceCardSkeleton.vue'
-import { 
-  Sparkles, 
-  Code2, 
-  Search, 
-  Bot,
-  Tv,
-  Palette,
-  Star,
-  Link2,
-  CheckCheck,
-  Share2,
-  ChevronLeft,
-  ChevronRight,
-  Play,
-  Pause,
-  Infinity as InfinityIcon
-} from 'lucide-vue-next'
+import { Sparkles, Code2 } from 'lucide-vue-next'
 
 const props = defineProps<{
   activeMainTab?: 'digital' | 'services'
@@ -40,28 +24,15 @@ const currentTab = ref<'digital' | 'services'>(props.activeMainTab || 'digital')
 watch(() => props.activeMainTab, (newVal) => {
   if (newVal) {
     currentTab.value = newVal
-    nextTick(() => {
-      if (newVal === 'services') {
-        initInfiniteServicePosition()
-      } else {
-        initInfinitePosition()
-      }
-    })
   }
 })
 
 // Dynamic Catalog from Supabase (with fallback to local catalog)
-const { products, services, isUsingRemote, isInitialLoading } = useCatalog()
+const { products, services, isInitialLoading } = useCatalog()
 
 // Sub-filters
 const digitalFilter = ref<'all' | 'ai' | 'edit' | 'rating' | 'streaming'>('all')
 const serviceFilter = ref<'all' | 'tugas-akhir' | 'apk-offline' | 'landing-page' | 'web-dinamis' | 'custom-web'>('all')
-const searchQuery = ref('')
-const isAiLinkCopied = ref(false)
-
-// Active Target Card Locking (prevents marquee running or infinite reset when user visits a direct product/service link)
-const activeTargetCardId = ref<string | null>(null)
-const activeTargetServiceId = ref<string | null>(null)
 
 // Category Counts
 const productCounts = computed(() => {
@@ -74,376 +45,89 @@ const productCounts = computed(() => {
   }
 })
 
-// Filtered Products
+const serviceCounts = computed(() => {
+  return {
+    all: services.value.length,
+    'tugas-akhir': services.value.filter(s => s.category === 'tugas-akhir').length,
+    'apk-offline': services.value.filter(s => s.category === 'apk-offline').length,
+    'landing-page': services.value.filter(s => s.category === 'landing-page').length,
+    'web-dinamis': services.value.filter(s => s.category === 'web-dinamis').length,
+    'custom-web': services.value.filter(s => s.category === 'custom-web').length,
+  }
+})
+
+// Filtered Products (Clean list without infinite duplicates)
 const filteredProducts = computed(() => {
-  return products.value.filter((item) => {
-    const matchesFilter = digitalFilter.value === 'all' || item.category === digitalFilter.value
-    const matchesSearch = 
-      item.name.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-      item.description.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-      item.features.some(f => f.toLowerCase().includes(searchQuery.value.toLowerCase()))
-    return matchesFilter && matchesSearch
-  })
+  if (digitalFilter.value === 'all') return products.value
+  return products.value.filter(item => item.category === digitalFilter.value)
 })
 
-// Filtered Services
+// Filtered Services (Clean list without infinite duplicates)
 const filteredServices = computed(() => {
-  return services.value.filter((item) => {
-    const matchesFilter = serviceFilter.value === 'all' || item.category === serviceFilter.value
-    const matchesSearch = 
-      item.name.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-      item.tagline.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-      item.deliverables.some(d => d.toLowerCase().includes(searchQuery.value.toLowerCase()))
-    return matchesFilter && matchesSearch
-  })
+  if (serviceFilter.value === 'all') return services.value
+  return services.value.filter(item => item.category === serviceFilter.value)
 })
 
-// --- Infinite Marquee Carousel State & Logic ---
-const productCarouselRef = ref<HTMLElement | null>(null)
-const isHovered = ref(false)
-const isMarqueePlaying = ref(true)
-let marqueeRafId: number | null = null
-let resumeTimeout: ReturnType<typeof setTimeout> | null = null
+// Target card locking for direct links
+const activeTargetCardId = ref<string | null>(null)
+const activeTargetServiceId = ref<string | null>(null)
 
-interface InfiniteProductItem {
-  product: ProductItem
-  uniqueKey: string
-  isPrimarySet: boolean
-}
+// Smooth scroll & highlight targeted product card
+const scrollToProductCard = (productId: string) => {
+  activeTargetCardId.value = productId
 
-// Generate repeated array for seamless infinite looping without gaps
-const infiniteProductList = computed<InfiniteProductItem[]>(() => {
-  const items = filteredProducts.value
-  if (items.length === 0) return []
-
-  // Multiplier ensures the track is always at least 3x the viewport width
-  let multiplier = 3
-  if (items.length <= 2) multiplier = 8
-  else if (items.length <= 4) multiplier = 5
-  else if (items.length <= 8) multiplier = 4
-
-  const repeated: InfiniteProductItem[] = []
-  for (let m = 0; m < multiplier; m++) {
-    items.forEach((p, idx) => {
-      repeated.push({
-        product: p,
-        uniqueKey: `${p.id}-m${m}-${idx}`,
-        isPrimarySet: m === 1
-      })
-    })
+  // Strip query parameters (?product=...) from address bar so state remains clean
+  if (window.location.search) {
+    history.replaceState(null, '', window.location.pathname + `#${productId}`)
   }
-  return repeated
-})
 
-// Calculate exact pixel width of 1 complete set of products (including gaps)
-const getSingleSetWidth = (): number => {
-  if (!productCarouselRef.value) return 0
-  const cards = productCarouselRef.value.querySelectorAll<HTMLElement>('.product-card-wrapper')
-  const count = filteredProducts.value.length
-  if (cards.length <= count || count === 0) return 0
-
-  const firstCard = cards[0]
-  const targetCard = cards[count]
-  if (firstCard && targetCard) {
-    const diff = targetCard.offsetLeft - firstCard.offsetLeft
-    return diff > 0 ? diff : 0
-  }
-  return 0
-}
-
-// Initialize scroll position to center set (so users can scroll left or right immediately)
-const initInfinitePosition = () => {
-  // If a specific card is currently targeted/locked, do NOT reset to start of set (ChatGPT)
-  if (activeTargetCardId.value) return
   nextTick(() => {
-    if (!productCarouselRef.value) return
-    const singleSet = getSingleSetWidth()
-    if (singleSet > 0) {
-      productCarouselRef.value.scrollLeft = singleSet
-    }
+    setTimeout(() => {
+      const cardEl = document.getElementById('product-' + productId)
+      if (cardEl) {
+        cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        cardEl.classList.add('ring-4', 'ring-blue-500', 'shadow-2xl', 'scale-[1.02]', 'transition-all', 'duration-300')
+        setTimeout(() => {
+          cardEl.classList.remove('ring-4', 'ring-blue-500', 'shadow-2xl', 'scale-[1.02]')
+        }, 4000)
+      } else {
+        document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+    }, 200)
   })
 }
 
-// Continuous smooth Marquee runner (using requestAnimationFrame)
-const stepMarquee = () => {
-  // Digital Products marquee
-  if (currentTab.value === 'digital' && productCarouselRef.value) {
-    if (isMarqueePlaying.value && !isHovered.value) {
-      const container = productCarouselRef.value
-      const singleSet = getSingleSetWidth()
+// Smooth scroll & highlight targeted service card
+const scrollToServiceCard = (serviceId: string) => {
+  activeTargetServiceId.value = serviceId
 
-      if (singleSet > 0) {
-        container.scrollLeft += 0.7
-
-        // Seamless wrap-around
-        if (container.scrollLeft >= singleSet * 2) {
-          container.scrollLeft -= singleSet
-        } else if (container.scrollLeft <= 0) {
-          container.scrollLeft += singleSet
-        }
-      }
-    }
+  if (window.location.search) {
+    history.replaceState(null, '', window.location.pathname + `#${serviceId}`)
   }
 
-  // Services marquee
-  if (currentTab.value === 'services' && serviceCarouselRef.value) {
-    if (isServiceMarqueePlaying.value && !isServiceHovered.value) {
-      const container = serviceCarouselRef.value
-      const singleSet = getSingleServiceSetWidth()
-
-      if (singleSet > 0) {
-        container.scrollLeft += 0.7
-
-        // Seamless wrap-around
-        if (container.scrollLeft >= singleSet * 2) {
-          container.scrollLeft -= singleSet
-        } else if (container.scrollLeft <= 0) {
-          container.scrollLeft += singleSet
-        }
-      }
-    }
-  }
-
-  marqueeRafId = requestAnimationFrame(stepMarquee)
-}
-
-// Pause marquee temporarily when user interacts
-const pauseMarqueeTemporarily = (durationMs = 4000) => {
-  isHovered.value = true
-  if (resumeTimeout) clearTimeout(resumeTimeout)
-  resumeTimeout = setTimeout(() => {
-    isHovered.value = false
-  }, durationMs)
-}
-
-// Toggle marquee play / pause
-const toggleMarquee = () => {
-  isMarqueePlaying.value = !isMarqueePlaying.value
-  if (isMarqueePlaying.value) {
-    isHovered.value = false
-  }
-}
-
-// Next / Previous buttons with infinite wrap-around (Never disabled)
-const scrollProductCarousel = (direction: 'left' | 'right') => {
-  if (!productCarouselRef.value) return
-  const container = productCarouselRef.value
-  const singleSet = getSingleSetWidth()
-
-  const firstCard = container.querySelector<HTMLElement>('.product-card-wrapper')
-  const cardWidthWithGap = firstCard ? firstCard.offsetWidth + 24 : 380
-
-  pauseMarqueeTemporarily(4000)
-
-  if (direction === 'right') {
-    if (singleSet > 0 && container.scrollLeft >= singleSet * 2 - cardWidthWithGap) {
-      container.scrollLeft -= singleSet
-    }
-    container.scrollBy({ left: cardWidthWithGap, behavior: 'smooth' })
-  } else {
-    if (singleSet > 0 && container.scrollLeft <= cardWidthWithGap) {
-      container.scrollLeft += singleSet
-    }
-    container.scrollBy({ left: -cardWidthWithGap, behavior: 'smooth' })
-  }
-}
-
-const handleMouseEnter = () => {
-  isHovered.value = true
-  if (resumeTimeout) clearTimeout(resumeTimeout)
-}
-
-const handleMouseLeave = () => {
-  if (resumeTimeout) clearTimeout(resumeTimeout)
-  resumeTimeout = setTimeout(() => {
-    isHovered.value = false
-  }, 1200)
-}
-
-const handleTouchStart = () => {
-  isHovered.value = true
-  if (resumeTimeout) clearTimeout(resumeTimeout)
-}
-
-const handleTouchEnd = () => {
-  // Never automatically resume marquee if it was paused/disabled for a direct link or by the user
-  if (!isMarqueePlaying.value) return
-  if (resumeTimeout) clearTimeout(resumeTimeout)
-  resumeTimeout = setTimeout(() => {
-    if (isMarqueePlaying.value) {
-      isHovered.value = false
-    }
-  }, 2500)
-}
-
-// Watch filtered products and preserve targeted card or reset carousel scroll to center set
-watch(() => filteredProducts.value, () => {
   nextTick(() => {
-    if (activeTargetCardId.value) {
-      // Re-center on the target card once Supabase data arrives
-      scrollToProductCard(activeTargetCardId.value)
-    } else {
-      initInfinitePosition()
-    }
+    setTimeout(() => {
+      const cardEl = document.getElementById('service-' + serviceId)
+      if (cardEl) {
+        cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        cardEl.classList.add('ring-4', 'ring-blue-500', 'shadow-2xl', 'scale-[1.02]', 'transition-all', 'duration-300')
+        setTimeout(() => {
+          cardEl.classList.remove('ring-4', 'ring-blue-500', 'shadow-2xl', 'scale-[1.02]')
+        }, 4000)
+      } else {
+        document.getElementById('semua-jasa-pull-store')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+    }, 200)
   })
-})
+}
 
-// Set digital filter and sync to URL hash (clearing any leftover query params like ?product=...)
+// Set digital filter and update URL
 const setDigitalFilter = (filter: 'all' | 'ai' | 'edit' | 'rating' | 'streaming') => {
-  activeTargetCardId.value = null // User intentionally selected a filter, release card lock
+  activeTargetCardId.value = null
   digitalFilter.value = filter
   const targetHash = filter === 'all' ? '#semua-produk-pull-store' : `#${filter}`
-  // Clean URL: Replace state with pathname + hash, stripping out any leftover ?product= or other queries
   history.replaceState(null, '', window.location.pathname + targetHash)
-  nextTick(() => {
-    initInfinitePosition()
-  })
 }
-
-// --- Infinite Marquee Carousel State & Logic for Services ---
-const serviceCarouselRef = ref<HTMLElement | null>(null)
-const isServiceHovered = ref(false)
-const isServiceMarqueePlaying = ref(true)
-let serviceResumeTimeout: ReturnType<typeof setTimeout> | null = null
-
-interface InfiniteServiceItem {
-  service: ServiceItem
-  uniqueKey: string
-  isPrimarySet: boolean
-}
-
-// Generate repeated array for seamless infinite looping without gaps
-const infiniteServiceList = computed<InfiniteServiceItem[]>(() => {
-  const items = filteredServices.value
-  if (items.length === 0) return []
-
-  let multiplier = 3
-  if (items.length <= 1) multiplier = 10
-  else if (items.length <= 2) multiplier = 8
-  else if (items.length <= 4) multiplier = 6
-  else if (items.length <= 8) multiplier = 4
-
-  const repeated: InfiniteServiceItem[] = []
-  for (let m = 0; m < multiplier; m++) {
-    items.forEach((s, idx) => {
-      repeated.push({
-        service: s,
-        uniqueKey: `${s.id}-m${m}-${idx}`,
-        isPrimarySet: m === 1
-      })
-    })
-  }
-  return repeated
-})
-
-// Calculate exact pixel width of 1 complete set of services (including gaps)
-const getSingleServiceSetWidth = (): number => {
-  if (!serviceCarouselRef.value) return 0
-  const cards = serviceCarouselRef.value.querySelectorAll<HTMLElement>('.service-card-wrapper')
-  const count = filteredServices.value.length
-  if (cards.length <= count || count === 0) return 0
-
-  const firstCard = cards[0]
-  const targetCard = cards[count]
-  if (firstCard && targetCard) {
-    const diff = targetCard.offsetLeft - firstCard.offsetLeft
-    return diff > 0 ? diff : 0
-  }
-  return 0
-}
-
-// Initialize scroll position to center set
-const initInfiniteServicePosition = () => {
-  // If a specific service card is currently targeted/locked, do NOT reset
-  if (activeTargetServiceId.value) return
-  nextTick(() => {
-    if (!serviceCarouselRef.value) return
-    const singleSet = getSingleServiceSetWidth()
-    if (singleSet > 0) {
-      serviceCarouselRef.value.scrollLeft = singleSet
-    }
-  })
-}
-
-// Pause service marquee temporarily when user interacts
-const pauseServiceMarqueeTemporarily = (durationMs = 4000) => {
-  isServiceHovered.value = true
-  if (serviceResumeTimeout) clearTimeout(serviceResumeTimeout)
-  serviceResumeTimeout = setTimeout(() => {
-    isServiceHovered.value = false
-  }, durationMs)
-}
-
-// Toggle service marquee play / pause
-const toggleServiceMarquee = () => {
-  isServiceMarqueePlaying.value = !isServiceMarqueePlaying.value
-  if (isServiceMarqueePlaying.value) {
-    isServiceHovered.value = false
-  }
-}
-
-// Next / Previous buttons with infinite wrap-around (Never disabled)
-const scrollServiceCarousel = (direction: 'left' | 'right') => {
-  if (!serviceCarouselRef.value) return
-  const container = serviceCarouselRef.value
-  const singleSet = getSingleServiceSetWidth()
-
-  const firstCard = container.querySelector<HTMLElement>('.service-card-wrapper')
-  const cardWidthWithGap = firstCard ? firstCard.offsetWidth + 24 : 450
-
-  pauseServiceMarqueeTemporarily(4000)
-
-  if (direction === 'right') {
-    if (singleSet > 0 && container.scrollLeft >= singleSet * 2 - cardWidthWithGap) {
-      container.scrollLeft -= singleSet
-    }
-    container.scrollBy({ left: cardWidthWithGap, behavior: 'smooth' })
-  } else {
-    if (singleSet > 0 && container.scrollLeft <= cardWidthWithGap) {
-      container.scrollLeft += singleSet
-    }
-    container.scrollBy({ left: -cardWidthWithGap, behavior: 'smooth' })
-  }
-}
-
-const handleServiceMouseEnter = () => {
-  isServiceHovered.value = true
-  if (serviceResumeTimeout) clearTimeout(serviceResumeTimeout)
-}
-
-const handleServiceMouseLeave = () => {
-  if (serviceResumeTimeout) clearTimeout(serviceResumeTimeout)
-  serviceResumeTimeout = setTimeout(() => {
-    isServiceHovered.value = false
-  }, 1200)
-}
-
-const handleServiceTouchStart = () => {
-  isServiceHovered.value = true
-  if (serviceResumeTimeout) clearTimeout(serviceResumeTimeout)
-}
-
-const handleServiceTouchEnd = () => {
-  // Never automatically resume service marquee if it was paused/disabled
-  if (!isServiceMarqueePlaying.value) return
-  if (serviceResumeTimeout) clearTimeout(serviceResumeTimeout)
-  serviceResumeTimeout = setTimeout(() => {
-    if (isServiceMarqueePlaying.value) {
-      isServiceHovered.value = false
-    }
-  }, 2500)
-}
-
-// Watch filtered services and preserve targeted service card or reset carousel scroll to center set
-watch(() => filteredServices.value, () => {
-  nextTick(() => {
-    if (activeTargetServiceId.value) {
-      scrollToServiceCard(activeTargetServiceId.value)
-    } else {
-      initInfiniteServicePosition()
-    }
-  })
-})
 
 // Service Filter URL Mapping & Setter
 const serviceHashMap: Record<'all' | 'tugas-akhir' | 'apk-offline' | 'landing-page' | 'web-dinamis' | 'custom-web', string> = {
@@ -455,186 +139,25 @@ const serviceHashMap: Record<'all' | 'tugas-akhir' | 'apk-offline' | 'landing-pa
   'custom-web': '#sistem-kustom'
 }
 
-const isServiceLinkCopied = ref(false)
-
 const setServiceFilter = (filter: 'all' | 'tugas-akhir' | 'landing-page' | 'web-dinamis' | 'apk-offline' | 'custom-web') => {
-  activeTargetServiceId.value = null // User intentionally selected a filter, release card lock
+  activeTargetServiceId.value = null
   serviceFilter.value = filter
   const targetHash = serviceHashMap[filter] || '#semua-jasa-pull-store'
-  // Clean URL: Replace state with pathname + hash, stripping out any leftover query params
   history.replaceState(null, '', window.location.pathname + targetHash)
-  nextTick(() => {
-    initInfiniteServicePosition()
-  })
 }
 
-const copyServiceCategoryLink = async () => {
-  const currentHash = serviceHashMap[serviceFilter.value] || '#semua-jasa-pull-store'
-  const url = `${window.location.origin}/${currentHash}`
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(url)
-    } else {
-      const input = document.createElement('input')
-      input.value = url
-      document.body.appendChild(input)
-      input.select()
-      document.execCommand('copy')
-      document.body.removeChild(input)
-    }
-    isServiceLinkCopied.value = true
-    setTimeout(() => {
-      isServiceLinkCopied.value = false
-    }, 2500)
-  } catch {
-    isServiceLinkCopied.value = true
-    setTimeout(() => {
-      isServiceLinkCopied.value = false
-    }, 2500)
+// Switch between Digital Products & Website / App
+const setMainTab = (tab: 'digital' | 'services') => {
+  currentTab.value = tab
+  activeTargetCardId.value = null
+  activeTargetServiceId.value = null
+  if (tab === 'digital') {
+    const targetHash = digitalFilter.value === 'all' ? '#semua-produk-pull-store' : `#${digitalFilter.value}`
+    history.replaceState(null, '', window.location.pathname + targetHash)
+  } else {
+    const targetHash = serviceHashMap[serviceFilter.value] || '#semua-jasa-pull-store'
+    history.replaceState(null, '', window.location.pathname + targetHash)
   }
-}
-
-// Copy All Products direct link (points to dedicated OG preview page)
-const isAllLinkCopied = ref(false)
-const copyAllCategoryLink = async () => {
-  const url = `${window.location.origin}/p/pull-store.html`
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(url)
-    } else {
-      const input = document.createElement('input')
-      input.value = url
-      document.body.appendChild(input)
-      input.select()
-      document.execCommand('copy')
-      document.body.removeChild(input)
-    }
-    isAllLinkCopied.value = true
-    setTimeout(() => {
-      isAllLinkCopied.value = false
-    }, 2500)
-  } catch {
-    isAllLinkCopied.value = true
-    setTimeout(() => {
-      isAllLinkCopied.value = false
-    }, 2500)
-  }
-}
-
-// Copy AI Productivity direct link (points to dedicated ChatGPT OG preview page)
-const copyAiCategoryLink = async () => {
-  const url = `${window.location.origin}/p/chatgpt.html`
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(url)
-    } else {
-      const input = document.createElement('input')
-      input.value = url
-      document.body.appendChild(input)
-      input.select()
-      document.execCommand('copy')
-      document.body.removeChild(input)
-    }
-    isAiLinkCopied.value = true
-    setTimeout(() => {
-      isAiLinkCopied.value = false
-    }, 2500)
-  } catch {
-    isAiLinkCopied.value = true
-    setTimeout(() => {
-      isAiLinkCopied.value = false
-    }, 2500)
-  }
-}
-
-// Smooth scroll & highlight targeted product card in carousel
-const scrollToProductCard = (productId: string) => {
-  activeTargetCardId.value = productId
-
-  // STOP auto-marquee when user arrives on a direct product link so the card never drifts away!
-  isMarqueePlaying.value = false
-  isHovered.value = true
-  if (resumeTimeout) clearTimeout(resumeTimeout)
-
-  // Clean URL: Strip leftover query parameters (like ?product=google-maps) so navigating later won't inherit them
-  if (window.location.search) {
-    history.replaceState(null, '', window.location.pathname + `#${productId}`)
-  }
-
-  nextTick(() => {
-    setTimeout(() => {
-      const cardEl = document.getElementById('product-' + productId)
-      const container = productCarouselRef.value
-      const sectionEl = document.getElementById('katalog-section')
-
-      if (sectionEl) {
-        sectionEl.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      }
-
-      if (cardEl && container) {
-        // Center the card horizontally inside carousel track
-        const cardOffset = cardEl.offsetLeft
-        const cardWidth = cardEl.offsetWidth
-        const containerWidth = container.offsetWidth
-        const targetScrollLeft = cardOffset - (containerWidth / 2) + (cardWidth / 2)
-
-        container.scrollTo({
-          left: Math.max(0, targetScrollLeft),
-          behavior: 'smooth'
-        })
-
-        // Glowing focus ring
-        cardEl.classList.add('ring-4', 'ring-blue-500', 'shadow-2xl', 'scale-[1.02]', 'transition-all', 'duration-300')
-        setTimeout(() => {
-          cardEl.classList.remove('ring-4', 'ring-blue-500', 'shadow-2xl', 'scale-[1.02]')
-        }, 5000)
-      }
-    }, 280)
-  })
-}
-
-// Smooth scroll & highlight targeted service card in carousel
-const scrollToServiceCard = (serviceId: string) => {
-  activeTargetServiceId.value = serviceId
-
-  // STOP auto-marquee when user arrives on a direct service link
-  isServiceMarqueePlaying.value = false
-  isServiceHovered.value = true
-  if (serviceResumeTimeout) clearTimeout(serviceResumeTimeout)
-
-  // Clean URL query parameters
-  if (window.location.search) {
-    history.replaceState(null, '', window.location.pathname + `#${serviceId}`)
-  }
-
-  nextTick(() => {
-    setTimeout(() => {
-      const cardEl = document.getElementById('service-' + serviceId)
-      const container = serviceCarouselRef.value
-      const sectionEl = document.getElementById('semua-jasa-pull-store') || document.getElementById('katalog-section')
-
-      if (sectionEl) {
-        sectionEl.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      }
-
-      if (cardEl && container) {
-        const cardOffset = cardEl.offsetLeft
-        const cardWidth = cardEl.offsetWidth
-        const containerWidth = container.offsetWidth
-        const targetScrollLeft = cardOffset - (containerWidth / 2) + (cardWidth / 2)
-
-        container.scrollTo({
-          left: Math.max(0, targetScrollLeft),
-          behavior: 'smooth'
-        })
-
-        cardEl.classList.add('ring-4', 'ring-blue-500', 'shadow-2xl', 'scale-[1.02]', 'transition-all', 'duration-300')
-        setTimeout(() => {
-          cardEl.classList.remove('ring-4', 'ring-blue-500', 'shadow-2xl', 'scale-[1.02]')
-        }, 5000)
-      }
-    }, 280)
-  })
 }
 
 // Universal product finder supporting exact IDs, shortcuts, and fuzzy names
@@ -664,11 +187,9 @@ const findProductByShortcutOrId = (token: string): ProductItem | undefined => {
   }
   const kw = keywordMap[clean] || clean
 
-  // 3. Substring match in ID or Name
+  // 3. Substring match
   found = products.value.find((p: ProductItem) => {
-    const pId = p.id.toLowerCase()
-    const pName = p.name.toLowerCase()
-    return pId.includes(kw) || pName.includes(kw)
+    return p.id.toLowerCase().includes(kw) || p.name.toLowerCase().includes(kw)
   })
   return found
 }
@@ -678,11 +199,9 @@ const findServiceByShortcutOrId = (token: string): ServiceItem | undefined => {
   if (!token) return undefined
   const clean = token.toLowerCase().replace(/^(service-|#)/, '').replace(/\.html$/, '').trim()
 
-  // 1. Exact ID
   let found = services.value.find((s: ServiceItem) => s.id.toLowerCase() === clean)
   if (found) return found
 
-  // 2. Keyword mapping
   const serviceKeywords: Record<string, string> = {
     'tugas-akhir': 'tugas-akhir',
     'skripsi': 'tugas-akhir',
@@ -705,11 +224,8 @@ const findServiceByShortcutOrId = (token: string): ServiceItem | undefined => {
   }
   const kw = serviceKeywords[clean] || clean
 
-  // 3. Substring match in ID or Name
   found = services.value.find((s: ServiceItem) => {
-    const sId = s.id.toLowerCase()
-    const sName = s.name.toLowerCase()
-    return sId.includes(kw) || sName.includes(kw)
+    return s.id.toLowerCase().includes(kw) || s.name.toLowerCase().includes(kw)
   })
   return found
 }
@@ -723,14 +239,12 @@ const handleUrlHashOrQuery = () => {
   const prodParam = (searchParams.get('product') || searchParams.get('p') || '').toLowerCase().trim()
   const serviceParam = (searchParams.get('service') || searchParams.get('s') || '').toLowerCase().trim()
 
-  // Check if opened via /p/:slug path
   const pathname = window.location.pathname.toLowerCase()
   let pathSlug = ''
   if (pathname.includes('/p/')) {
     pathSlug = pathname.split('/p/')[1]?.replace(/\.html$/, '')?.trim() || ''
   }
 
-  // Set of known general category hashes
   const KNOWN_CATEGORY_HASHES = new Set([
     'semua-produk-pull-store', 'semua', 'katalog-produk', 'all',
     'ai', 'edit', 'rating', 'streaming',
@@ -742,125 +256,80 @@ const handleUrlHashOrQuery = () => {
     'sistem-kustom', 'custom-web', 'sistem'
   ])
 
-  // If the user navigated directly to a general category hash, give that absolute priority
-  // and release any previous card lock, while stripping old query parameters like ?product=...
-  const isExplicitCategoryHash = KNOWN_CATEGORY_HASHES.has(rawHash)
-
-  if (isExplicitCategoryHash) {
+  // If user clicked/navigated to a category hash directly
+  if (KNOWN_CATEGORY_HASHES.has(rawHash)) {
     activeTargetCardId.value = null
     activeTargetServiceId.value = null
 
-    // Strip leftover queries from address bar
     if (window.location.search) {
       history.replaceState(null, '', window.location.pathname + hash)
     }
 
-    // 1. Digital product categories
     if (['streaming'].includes(rawHash)) {
       currentTab.value = 'digital'
       digitalFilter.value = 'streaming'
-      nextTick(() => {
-        document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' })
-        initInfinitePosition()
-      })
+      nextTick(() => { document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' }) })
       return
     }
     if (['rating'].includes(rawHash)) {
       currentTab.value = 'digital'
       digitalFilter.value = 'rating'
-      nextTick(() => {
-        document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' })
-        initInfinitePosition()
-      })
+      nextTick(() => { document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' }) })
       return
     }
     if (['edit'].includes(rawHash)) {
       currentTab.value = 'digital'
       digitalFilter.value = 'edit'
-      nextTick(() => {
-        document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' })
-        initInfinitePosition()
-      })
+      nextTick(() => { document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' }) })
       return
     }
     if (['ai'].includes(rawHash)) {
       currentTab.value = 'digital'
       digitalFilter.value = 'ai'
-      nextTick(() => {
-        document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' })
-        initInfinitePosition()
-      })
+      nextTick(() => { document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' }) })
       return
     }
     if (['semua-produk-pull-store', 'semua', 'katalog-produk', 'all'].includes(rawHash)) {
       currentTab.value = 'digital'
       digitalFilter.value = 'all'
-      nextTick(() => {
-        document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' })
-        initInfinitePosition()
-      })
+      nextTick(() => { document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' }) })
       return
     }
 
-    // 2. Service categories
     if (['tugas-akhir', 'skripsi', 'ta', 'mahasiswa'].includes(rawHash)) {
       currentTab.value = 'services'
       serviceFilter.value = 'tugas-akhir'
-      nextTick(() => {
-        const el = document.getElementById('tugas-akhir') || document.getElementById('semua-jasa-pull-store') || document.getElementById('katalog-section')
-        el?.scrollIntoView({ behavior: 'smooth' })
-        initInfiniteServicePosition()
-      })
+      nextTick(() => { document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' }) })
       return
     }
     if (['aplikasi-kasir', 'kasir', 'apk-offline', 'kasir-offline'].includes(rawHash)) {
       currentTab.value = 'services'
       serviceFilter.value = 'apk-offline'
-      nextTick(() => {
-        const el = document.getElementById('aplikasi-kasir') || document.getElementById('semua-jasa-pull-store') || document.getElementById('katalog-section')
-        el?.scrollIntoView({ behavior: 'smooth' })
-        initInfiniteServicePosition()
-      })
+      nextTick(() => { document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' }) })
       return
     }
     if (['website-statis', 'web-statis', 'landing-page'].includes(rawHash)) {
       currentTab.value = 'services'
       serviceFilter.value = 'landing-page'
-      nextTick(() => {
-        const el = document.getElementById('website-statis') || document.getElementById('semua-jasa-pull-store') || document.getElementById('katalog-section')
-        el?.scrollIntoView({ behavior: 'smooth' })
-        initInfiniteServicePosition()
-      })
+      nextTick(() => { document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' }) })
       return
     }
     if (['website-dinamis', 'web-dinamis', 'cms'].includes(rawHash)) {
       currentTab.value = 'services'
       serviceFilter.value = 'web-dinamis'
-      nextTick(() => {
-        const el = document.getElementById('website-dinamis') || document.getElementById('semua-jasa-pull-store') || document.getElementById('katalog-section')
-        el?.scrollIntoView({ behavior: 'smooth' })
-        initInfiniteServicePosition()
-      })
+      nextTick(() => { document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' }) })
       return
     }
     if (['sistem-kustom', 'custom-web', 'sistem'].includes(rawHash)) {
       currentTab.value = 'services'
       serviceFilter.value = 'custom-web'
-      nextTick(() => {
-        const el = document.getElementById('sistem-kustom') || document.getElementById('semua-jasa-pull-store') || document.getElementById('katalog-section')
-        el?.scrollIntoView({ behavior: 'smooth' })
-        initInfiniteServicePosition()
-      })
+      nextTick(() => { document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' }) })
       return
     }
     if (['semua-jasa-pull-store', 'semua-jasa', 'jasa-software', 'jasa', 'software'].includes(rawHash)) {
       currentTab.value = 'services'
       serviceFilter.value = 'all'
-      nextTick(() => {
-        const el = document.getElementById('semua-jasa-pull-store') || document.getElementById('katalog-section')
-        el?.scrollIntoView({ behavior: 'smooth' })
-        initInfiniteServicePosition()
-      })
+      nextTick(() => { document.getElementById('katalog-section')?.scrollIntoView({ behavior: 'smooth' }) })
       return
     }
   }
@@ -956,7 +425,7 @@ const handleUrlHashOrQuery = () => {
   }
 }
 
-// Watch live products/services changes from Supabase to re-target card once data loads
+// Watch live products/services changes from Supabase
 watch(() => products.value, () => {
   nextTick(() => {
     if (activeTargetCardId.value) {
@@ -977,49 +446,14 @@ watch(() => services.value, () => {
   })
 })
 
-const handleWindowResize = () => {
-  if (!activeTargetCardId.value) initInfinitePosition()
-  if (!activeTargetServiceId.value) initInfiniteServicePosition()
-}
-
 onMounted(() => {
   handleUrlHashOrQuery()
   window.addEventListener('hashchange', handleUrlHashOrQuery)
-  window.addEventListener('resize', handleWindowResize)
-  nextTick(() => {
-    if (!activeTargetCardId.value) initInfinitePosition()
-    if (!activeTargetServiceId.value) initInfiniteServicePosition()
-  })
-  marqueeRafId = requestAnimationFrame(stepMarquee)
 })
 
 onUnmounted(() => {
   window.removeEventListener('hashchange', handleUrlHashOrQuery)
-  window.removeEventListener('resize', handleWindowResize)
-  if (marqueeRafId) cancelAnimationFrame(marqueeRafId)
-  if (resumeTimeout) clearTimeout(resumeTimeout)
-  if (serviceResumeTimeout) clearTimeout(serviceResumeTimeout)
 })
-
-const setMainTab = (tab: 'digital' | 'services') => {
-  currentTab.value = tab
-  searchQuery.value = ''
-  activeTargetCardId.value = null
-  activeTargetServiceId.value = null
-  if (tab === 'digital') {
-    const targetHash = digitalFilter.value === 'all' ? '#semua-produk-pull-store' : `#${digitalFilter.value}`
-    history.replaceState(null, '', window.location.pathname + targetHash)
-    nextTick(() => {
-      initInfinitePosition()
-    })
-  } else {
-    const targetHash = serviceHashMap[serviceFilter.value] || '#semua-jasa-pull-store'
-    history.replaceState(null, '', window.location.pathname + targetHash)
-    nextTick(() => {
-      initInfiniteServicePosition()
-    })
-  }
-}
 </script>
 
 <template>
@@ -1031,20 +465,12 @@ const setMainTab = (tab: 'digital' | 'services') => {
     <div id="website-statis" class="scroll-mt-24"></div>
     <div id="website-dinamis" class="scroll-mt-24"></div>
     <div id="sistem-kustom" class="scroll-mt-24"></div>
+
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       
-      <!-- Section Header -->
-      <div class="text-center max-w-2xl mx-auto">
-        <div class="inline-flex items-center gap-2">
-          <span class="text-xs font-mono font-semibold uppercase tracking-wider text-blue-600 bg-blue-50 px-2.5 py-1 rounded-md border border-blue-100">
-            Dual-Catalog Engine
-          </span>
-          <span v-if="isUsingRemote" class="inline-flex items-center gap-1.5 text-[10px] font-mono font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 shadow-xs" title="Katalog terhubung secara dinamis ke Supabase Database">
-            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            Database Dinamis
-          </span>
-        </div>
-        <h2 class="mt-3 text-2xl sm:text-4xl font-extrabold tracking-tight text-zinc-950">
+      <!-- Section Header (Clean & Minimalist) -->
+      <div class="text-center max-w-2xl mx-auto mb-8">
+        <h2 class="text-2xl sm:text-4xl font-extrabold tracking-tight text-zinc-950">
           Pilih Kebutuhan Digital Anda
         </h2>
         <p class="mt-2 text-sm text-zinc-600">
@@ -1052,20 +478,20 @@ const setMainTab = (tab: 'digital' | 'services') => {
         </p>
       </div>
 
-      <!-- Main Dual-View Tab Selector -->
-      <div class="mt-8 flex justify-center">
-        <div class="inline-flex p-1.5 rounded-xl bg-zinc-200/80 border border-zinc-200 shadow-inner">
+      <!-- Main Tab Switcher: Produk Digital vs Website / App -->
+      <div class="flex justify-center mb-8">
+        <div class="inline-flex p-1 rounded-xl bg-zinc-200/80 border border-zinc-200 shadow-inner">
           <button
             type="button"
             @click="setMainTab('digital')"
             class="flex items-center gap-2 px-5 py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all duration-200 focus:outline-none"
             :class="currentTab === 'digital'
-              ? 'bg-white text-zinc-950 shadow-subtle border border-zinc-200/80'
+              ? 'bg-white text-zinc-950 shadow-sm border border-zinc-200/80'
               : 'text-zinc-600 hover:text-zinc-950'"
           >
-            <Sparkles class="w-4 h-4 text-blue-600" :stroke-width="1.75" />
-            <span>1. Akun Digital & AI Pro</span>
-            <span class="ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-zinc-100 text-zinc-700">
+            <Sparkles class="w-4 h-4 text-blue-600" :stroke-width="2" />
+            <span>Produk Digital</span>
+            <span class="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-mono bg-zinc-100 text-zinc-700 font-bold">
               {{ products.length }}
             </span>
           </button>
@@ -1075,48 +501,47 @@ const setMainTab = (tab: 'digital' | 'services') => {
             @click="setMainTab('services')"
             class="flex items-center gap-2 px-5 py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all duration-200 focus:outline-none"
             :class="currentTab === 'services'
-              ? 'bg-white text-zinc-950 shadow-subtle border border-zinc-200/80'
+              ? 'bg-white text-zinc-950 shadow-sm border border-zinc-200/80'
               : 'text-zinc-600 hover:text-zinc-950'"
           >
-            <Code2 class="w-4 h-4 text-blue-600" :stroke-width="1.75" />
-            <span>2. Jasa Software Dev</span>
-            <span class="ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-zinc-100 text-zinc-700">
+            <Code2 class="w-4 h-4 text-blue-600" :stroke-width="2" />
+            <span>Website / App</span>
+            <span class="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-mono bg-zinc-100 text-zinc-700 font-bold">
               {{ services.length }}
             </span>
           </button>
         </div>
       </div>
 
-      <!-- Search & Sub-category Bar -->
-      <div class="mt-8 flex flex-col md:flex-row items-center justify-between gap-4 max-w-5xl mx-auto">
+      <!-- Sub-category Filter Pills (Clean, Centered, No AI Slop Banners) -->
+      <div class="flex items-center justify-center gap-2 overflow-x-auto pb-3 mb-8 scrollbar-none">
         
-        <!-- Category Filter Pills -->
-        <div v-if="currentTab === 'digital'" class="flex items-center gap-2 overflow-x-auto w-full md:w-auto pb-2 md:pb-0">
+        <!-- Digital Product Categories -->
+        <template v-if="currentTab === 'digital'">
           <button
             type="button"
             @click="setDigitalFilter('all')"
-            class="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0"
+            class="px-4 py-2 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer"
             :class="digitalFilter === 'all' 
-              ? 'bg-zinc-950 text-white shadow-xs' 
-              : 'bg-white text-zinc-700 border border-zinc-200 hover:bg-zinc-100'"
+              ? 'bg-zinc-950 text-white shadow-sm' 
+              : 'bg-white text-zinc-700 border border-zinc-200/80 hover:bg-zinc-100'"
           >
             <span>Semua</span>
-            <span class="px-1.5 py-0.2 rounded-full text-[10px] font-mono" :class="digitalFilter === 'all' ? 'bg-zinc-800 text-zinc-200' : 'bg-zinc-100 text-zinc-600'">
+            <span class="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] font-mono" :class="digitalFilter === 'all' ? 'bg-zinc-800 text-zinc-200' : 'bg-zinc-100 text-zinc-600'">
               {{ productCounts.all }}
             </span>
           </button>
-          
+
           <button
             type="button"
             @click="setDigitalFilter('ai')"
-            class="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0"
+            class="px-4 py-2 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer"
             :class="digitalFilter === 'ai' 
-              ? 'bg-zinc-950 text-white shadow-xs' 
-              : 'bg-white text-zinc-700 border border-zinc-200 hover:bg-zinc-100'"
+              ? 'bg-zinc-950 text-white shadow-sm' 
+              : 'bg-white text-zinc-700 border border-zinc-200/80 hover:bg-zinc-100'"
           >
-            <Bot class="w-3.5 h-3.5" :stroke-width="1.75" />
-            <span>AI Productivity</span>
-            <span class="px-1.5 py-0.2 rounded-full text-[10px] font-mono" :class="digitalFilter === 'ai' ? 'bg-zinc-800 text-zinc-200' : 'bg-zinc-100 text-zinc-600'">
+            <span>AI</span>
+            <span class="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] font-mono" :class="digitalFilter === 'ai' ? 'bg-zinc-800 text-zinc-200' : 'bg-zinc-100 text-zinc-600'">
               {{ productCounts.ai }}
             </span>
           </button>
@@ -1124,14 +549,13 @@ const setMainTab = (tab: 'digital' | 'services') => {
           <button
             type="button"
             @click="setDigitalFilter('edit')"
-            class="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0"
+            class="px-4 py-2 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer"
             :class="digitalFilter === 'edit' 
-              ? 'bg-zinc-950 text-white shadow-xs' 
-              : 'bg-white text-zinc-700 border border-zinc-200 hover:bg-zinc-100'"
+              ? 'bg-zinc-950 text-white shadow-sm' 
+              : 'bg-white text-zinc-700 border border-zinc-200/80 hover:bg-zinc-100'"
           >
-            <Palette class="w-3.5 h-3.5" :stroke-width="1.75" />
             <span>Desain & Edit</span>
-            <span class="px-1.5 py-0.2 rounded-full text-[10px] font-mono" :class="digitalFilter === 'edit' ? 'bg-zinc-800 text-zinc-200' : 'bg-zinc-100 text-zinc-600'">
+            <span class="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] font-mono" :class="digitalFilter === 'edit' ? 'bg-zinc-800 text-zinc-200' : 'bg-zinc-100 text-zinc-600'">
               {{ productCounts.edit }}
             </span>
           </button>
@@ -1139,14 +563,13 @@ const setMainTab = (tab: 'digital' | 'services') => {
           <button
             type="button"
             @click="setDigitalFilter('rating')"
-            class="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0"
+            class="px-4 py-2 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer"
             :class="digitalFilter === 'rating' 
-              ? 'bg-zinc-950 text-white shadow-xs' 
-              : 'bg-white text-zinc-700 border border-zinc-200 hover:bg-zinc-100'"
+              ? 'bg-zinc-950 text-white shadow-sm' 
+              : 'bg-white text-zinc-700 border border-zinc-200/80 hover:bg-zinc-100'"
           >
-            <Star class="w-3.5 h-3.5" :stroke-width="1.75" />
             <span>Jasa Rating Maps</span>
-            <span class="px-1.5 py-0.2 rounded-full text-[10px] font-mono" :class="digitalFilter === 'rating' ? 'bg-zinc-800 text-zinc-200' : 'bg-zinc-100 text-zinc-600'">
+            <span class="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] font-mono" :class="digitalFilter === 'rating' ? 'bg-zinc-800 text-zinc-200' : 'bg-zinc-100 text-zinc-600'">
               {{ productCounts.rating }}
             </span>
           </button>
@@ -1154,439 +577,167 @@ const setMainTab = (tab: 'digital' | 'services') => {
           <button
             type="button"
             @click="setDigitalFilter('streaming')"
-            class="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0"
+            class="px-4 py-2 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer"
             :class="digitalFilter === 'streaming' 
-              ? 'bg-zinc-950 text-white shadow-xs' 
-              : 'bg-white text-zinc-700 border border-zinc-200 hover:bg-zinc-100'"
+              ? 'bg-zinc-950 text-white shadow-sm' 
+              : 'bg-white text-zinc-700 border border-zinc-200/80 hover:bg-zinc-100'"
           >
-            <Tv class="w-3.5 h-3.5" :stroke-width="1.75" />
             <span>Streaming & Meeting</span>
-            <span class="px-1.5 py-0.2 rounded-full text-[10px] font-mono" :class="digitalFilter === 'streaming' ? 'bg-zinc-800 text-zinc-200' : 'bg-zinc-100 text-zinc-600'">
+            <span class="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] font-mono" :class="digitalFilter === 'streaming' ? 'bg-zinc-800 text-zinc-200' : 'bg-zinc-100 text-zinc-600'">
               {{ productCounts.streaming }}
             </span>
           </button>
+        </template>
 
-          <!-- Copy Direct Link Button for AI -->
-          <button
-            v-if="digitalFilter === 'ai'"
-            type="button"
-            @click="copyAiCategoryLink"
-            class="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono font-medium transition-colors shrink-0 ml-1"
-            :class="isAiLinkCopied 
-              ? 'bg-emerald-50 text-emerald-700 border border-emerald-300 font-semibold' 
-              : 'bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100'"
-            title="Salin Direct Link URL AI Productivity"
-          >
-            <CheckCheck v-if="isAiLinkCopied" class="w-3.5 h-3.5 text-emerald-600" />
-            <Link2 v-else class="w-3.5 h-3.5 text-blue-600" />
-            <span>{{ isAiLinkCopied ? 'Link AI Tersalin!' : 'Salin Link AI' }}</span>
-          </button>
-
-          <!-- Copy Direct Link Button for Semua Produk -->
-          <button
-            v-if="digitalFilter === 'all'"
-            type="button"
-            @click="copyAllCategoryLink"
-            class="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono font-medium transition-colors shrink-0 ml-1"
-            :class="isAllLinkCopied 
-              ? 'bg-emerald-50 text-emerald-700 border border-emerald-300 font-semibold' 
-              : 'bg-zinc-100 text-zinc-700 border border-zinc-200 hover:bg-zinc-200'"
-            title="Salin Direct Link Semua Produk (#semua-produk-pull-store)"
-          >
-            <CheckCheck v-if="isAllLinkCopied" class="w-3.5 h-3.5 text-emerald-600" />
-            <Link2 v-else class="w-3.5 h-3.5 text-zinc-600" />
-            <span>{{ isAllLinkCopied ? 'Link Semua Tersalin!' : 'Salin Link Semua' }}</span>
-          </button>
-        </div>
-
-        <div v-else class="flex items-center gap-2 overflow-x-auto w-full md:w-auto pb-2 md:pb-0">
+        <!-- Service / App Categories -->
+        <template v-else>
           <button
             type="button"
             @click="setServiceFilter('all')"
-            class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0"
+            class="px-4 py-2 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer"
             :class="serviceFilter === 'all' 
-              ? 'bg-zinc-950 text-white shadow-xs' 
-              : 'bg-white text-zinc-700 border border-zinc-200 hover:bg-zinc-100'"
+              ? 'bg-zinc-950 text-white shadow-sm' 
+              : 'bg-white text-zinc-700 border border-zinc-200/80 hover:bg-zinc-100'"
           >
-            Semua Solusi Bisnis
+            <span>Semua Solusi</span>
+            <span class="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] font-mono" :class="serviceFilter === 'all' ? 'bg-zinc-800 text-zinc-200' : 'bg-zinc-100 text-zinc-600'">
+              {{ serviceCounts.all }}
+            </span>
           </button>
+
           <button
             type="button"
             @click="setServiceFilter('tugas-akhir')"
-            class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0"
+            class="px-4 py-2 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer"
             :class="serviceFilter === 'tugas-akhir' 
-              ? 'bg-zinc-950 text-white shadow-xs' 
-              : 'bg-white text-zinc-700 border border-zinc-200 hover:bg-zinc-100'"
+              ? 'bg-zinc-950 text-white shadow-sm' 
+              : 'bg-white text-zinc-700 border border-zinc-200/80 hover:bg-zinc-100'"
           >
-            Tugas Akhir / Skripsi (Start 500Rb)
+            <span>Tugas Akhir / Skripsi (Start 500Rb)</span>
+            <span class="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] font-mono" :class="serviceFilter === 'tugas-akhir' ? 'bg-zinc-800 text-zinc-200' : 'bg-zinc-100 text-zinc-600'">
+              {{ serviceCounts['tugas-akhir'] }}
+            </span>
           </button>
+
           <button
             type="button"
             @click="setServiceFilter('apk-offline')"
-            class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0"
+            class="px-4 py-2 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer"
             :class="serviceFilter === 'apk-offline' 
-              ? 'bg-zinc-950 text-white shadow-xs' 
-              : 'bg-white text-zinc-700 border border-zinc-200 hover:bg-zinc-100'"
+              ? 'bg-zinc-950 text-white shadow-sm' 
+              : 'bg-white text-zinc-700 border border-zinc-200/80 hover:bg-zinc-100'"
           >
-            Aplikasi Kasir (Start 700Rb)
+            <span>Aplikasi Kasir (Start 700Rb)</span>
           </button>
+
           <button
             type="button"
             @click="setServiceFilter('landing-page')"
-            class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0"
+            class="px-4 py-2 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer"
             :class="serviceFilter === 'landing-page' 
-              ? 'bg-zinc-950 text-white shadow-xs' 
-              : 'bg-white text-zinc-700 border border-zinc-200 hover:bg-zinc-100'"
+              ? 'bg-zinc-950 text-white shadow-sm' 
+              : 'bg-white text-zinc-700 border border-zinc-200/80 hover:bg-zinc-100'"
           >
-            Web Statis (Start 850Rb)
+            <span>Web Statis (Start 850Rb)</span>
           </button>
+
           <button
             type="button"
             @click="setServiceFilter('web-dinamis')"
-            class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0"
+            class="px-4 py-2 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer"
             :class="serviceFilter === 'web-dinamis' 
-              ? 'bg-zinc-950 text-white shadow-xs' 
-              : 'bg-white text-zinc-700 border border-zinc-200 hover:bg-zinc-100'"
+              ? 'bg-zinc-950 text-white shadow-sm' 
+              : 'bg-white text-zinc-700 border border-zinc-200/80 hover:bg-zinc-100'"
           >
-            Web Dinamis & CMS (1.5 - 3Jt)
+            <span>Web Dinamis & CMS (1.5 - 3Jt)</span>
           </button>
+
           <button
             type="button"
             @click="setServiceFilter('custom-web')"
-            class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0"
+            class="px-4 py-2 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer"
             :class="serviceFilter === 'custom-web' 
-              ? 'bg-zinc-950 text-white shadow-xs' 
-              : 'bg-white text-zinc-700 border border-zinc-200 hover:bg-zinc-100'"
+              ? 'bg-zinc-950 text-white shadow-sm' 
+              : 'bg-white text-zinc-700 border border-zinc-200/80 hover:bg-zinc-100'"
           >
-            Sistem Kustom
+            <span>Sistem Kustom</span>
           </button>
-
-          <!-- Copy Direct Link Button for Service -->
-          <button
-            v-if="serviceFilter !== 'all'"
-            type="button"
-            @click="copyServiceCategoryLink"
-            class="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono font-medium transition-colors shrink-0 ml-1"
-            :class="isServiceLinkCopied 
-              ? 'bg-emerald-50 text-emerald-700 border border-emerald-300 font-semibold' 
-              : 'bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100'"
-            title="Salin Direct Link Filter Jasa Ini"
-          >
-            <CheckCheck v-if="isServiceLinkCopied" class="w-3.5 h-3.5 text-emerald-600" />
-            <Link2 v-else class="w-3.5 h-3.5 text-blue-600" />
-            <span>{{ isServiceLinkCopied ? 'Link Jasa Tersalin!' : 'Salin Link' }}</span>
-          </button>
-        </div>
-
-        <!-- Search Bar -->
-        <div class="relative w-full md:w-72">
-          <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" :stroke-width="1.75" />
-          <input
-            v-model="searchQuery"
-            type="text"
-            :placeholder="currentTab === 'digital' ? 'Cari ChatGPT, Netflix...' : 'Cari Kasir Offline, Website, Sistem...'"
-            class="w-full pl-9 pr-4 py-1.5 rounded-lg text-xs bg-white border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent text-zinc-950 placeholder:text-zinc-400 transition-all shadow-subtle"
-          />
-        </div>
+        </template>
       </div>
 
-      <!-- Direct Share Info Banner for AI Productivity -->
-      <div 
-        v-if="digitalFilter === 'ai' && currentTab === 'digital'" 
-        class="mt-6 p-4 rounded-xl bg-blue-50/80 border border-blue-200/90 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-subtle max-w-5xl mx-auto"
-      >
-        <div class="flex items-center gap-3">
-          <div class="w-9 h-9 rounded-lg bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-            <Bot class="w-5 h-5" :stroke-width="1.75" />
-          </div>
-          <div>
-            <div class="flex items-center gap-2">
-              <span class="text-xs font-bold text-zinc-950">
-                Direct Link Aktif: AI Productivity
-              </span>
-              <span class="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-blue-100 text-blue-800">
-                #ai
-              </span>
-            </div>
-            <p class="text-xs text-zinc-600 mt-0.5">
-              Tersedia Gemini AI 5TB, ChatGPT Plus, dan Claude 3.5 Sonnet. Salin link ini untuk langsung terarah ke katalog AI saat dibagikan.
-            </p>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          @click="copyAiCategoryLink"
-          class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all duration-150 shrink-0 shadow-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-          :class="isAiLinkCopied 
-            ? 'bg-emerald-600 text-white font-bold' 
-            : 'bg-white text-blue-700 hover:bg-blue-600 hover:text-white border border-blue-300'"
-        >
-          <CheckCheck v-if="isAiLinkCopied" class="w-4 h-4" />
-          <Share2 v-else class="w-4 h-4" />
-          <span>{{ isAiLinkCopied ? 'Link AI Berhasil Disalin!' : 'Salin Link Katalog AI' }}</span>
-        </button>
-      </div>
-
-      <!-- VIEW 1: DIGITAL PRODUCTS INFINITE MARQUEE CAROUSEL -->
-      <div v-if="currentTab === 'digital'" id="katalog-produk" class="mt-8">
+      <!-- VIEW 1: DIGITAL PRODUCTS - CLEAN RESPONSIVE GRID (NO INFINITY LOOP) -->
+      <div v-if="currentTab === 'digital'" id="katalog-produk">
         
-        <!-- Navigation Controls & Marquee Header -->
-        <div v-if="filteredProducts.length > 0" class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4 px-1">
-          <div class="flex items-center gap-2 text-xs font-mono flex-wrap">
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-zinc-100 text-zinc-700 font-bold border border-zinc-200">
-              {{ filteredProducts.length }} Produk
-            </span>
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 font-medium border border-blue-200">
-              <InfinityIcon class="w-3.5 h-3.5 text-blue-600" />
-              <span>Infinite Marquee Carousel</span>
-            </span>
-            <span class="hidden md:inline-flex items-center gap-1 text-[11px] text-zinc-400">
-              • Arahkan kursor ke kartu untuk jeda
-            </span>
-          </div>
-
-          <!-- Marquee Toggle & Navigation Arrow Buttons -->
-          <div class="flex items-center gap-2 w-full sm:w-auto justify-end">
-            <!-- Marquee Play/Pause Toggle -->
-            <button
-              type="button"
-              @click="toggleMarquee"
-              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-zinc-200 bg-white text-xs font-semibold text-zinc-700 hover:bg-zinc-50 shadow-xs transition-colors cursor-pointer"
-              :title="isMarqueePlaying ? 'Jeda marquee otomatis' : 'Jalankan marquee otomatis'"
-            >
-              <span 
-                class="w-2 h-2 rounded-full"
-                :class="isMarqueePlaying && !isHovered ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-400'"
-              ></span>
-              <Pause v-if="isMarqueePlaying" class="w-3.5 h-3.5 text-zinc-600" />
-              <Play v-else class="w-3.5 h-3.5 text-zinc-600" />
-              <span class="text-xs">{{ isMarqueePlaying ? (isHovered ? 'Dijeda' : 'Marquee Aktif') : 'Putar Marquee' }}</span>
-            </button>
-
-            <!-- Arrow Navigation Buttons (Never disabled, infinite loop) -->
-            <button
-              type="button"
-              @click="scrollProductCarousel('left')"
-              class="w-9 h-9 rounded-xl border border-zinc-200 bg-white flex items-center justify-center text-zinc-700 transition-all duration-150 shadow-xs hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500 active:scale-95 cursor-pointer"
-              aria-label="Geser produk ke kiri"
-              title="Geser ke kiri (Loop)"
-            >
-              <ChevronLeft class="w-4 h-4" :stroke-width="2.25" />
-            </button>
-
-            <button
-              type="button"
-              @click="scrollProductCarousel('right')"
-              class="w-9 h-9 rounded-xl border border-zinc-200 bg-white flex items-center justify-center text-zinc-700 transition-all duration-150 shadow-xs hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500 active:scale-95 cursor-pointer"
-              aria-label="Geser produk ke kanan"
-              title="Geser ke kanan (Loop)"
-            >
-              <ChevronRight class="w-4 h-4" :stroke-width="2.25" />
-            </button>
-          </div>
+        <!-- Loading Skeleton State -->
+        <div v-if="isInitialLoading" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <ProductCardSkeleton v-for="i in 6" :key="i" />
         </div>
 
-        <!-- Loading Skeleton State for Digital Products -->
-        <div v-if="isInitialLoading" class="flex gap-6 overflow-x-auto py-3 px-1" style="scrollbar-width: none;">
-          <div 
-            v-for="i in 3" 
-            :key="i"
-            class="w-full sm:w-[calc((100%-1.5rem)/2)] lg:w-[calc((100%-3rem)/3)] shrink-0 flex flex-col"
-          >
-            <ProductCardSkeleton />
-          </div>
-        </div>
-
-        <!-- Carousel Track with Side Floating Arrows & Native Touch / Swipe Drag -->
+        <!-- Clean Product Grid -->
         <div 
           v-else-if="filteredProducts.length > 0" 
-          class="relative group/carousel"
-          @mouseenter="handleMouseEnter"
-          @mouseleave="handleMouseLeave"
-          @touchstart="handleTouchStart"
-          @touchend="handleTouchEnd"
+          class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
         >
-          <!-- Floating Left Arrow for Extra Large Desktop Screens -->
-          <button
-            type="button"
-            @click="scrollProductCarousel('left')"
-            class="hidden 2xl:flex absolute -left-12 top-1/2 -translate-y-1/2 z-30 w-11 h-11 rounded-full bg-white border border-zinc-200 text-zinc-800 shadow-elevated items-center justify-center hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-all focus:outline-none active:scale-95 cursor-pointer"
-            aria-label="Geser ke kiri"
-          >
-            <ChevronLeft class="w-5 h-5" :stroke-width="2.25" />
-          </button>
-
-          <!-- Floating Right Arrow for Extra Large Desktop Screens -->
-          <button
-            type="button"
-            @click="scrollProductCarousel('right')"
-            class="hidden 2xl:flex absolute -right-12 top-1/2 -translate-y-1/2 z-30 w-11 h-11 rounded-full bg-white border border-zinc-200 text-zinc-800 shadow-elevated items-center justify-center hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-all focus:outline-none active:scale-95 cursor-pointer"
-            aria-label="Geser ke kanan"
-          >
-            <ChevronRight class="w-5 h-5" :stroke-width="2.25" />
-          </button>
-
-          <!-- Scrollable Infinite Container (py-3 px-1 ensures shadow/border never clips) -->
           <div
-            ref="productCarouselRef"
-            class="flex gap-6 overflow-x-auto py-3 px-1"
-            style="scrollbar-width: none; -ms-overflow-style: none;"
+            v-for="product in filteredProducts"
+            :key="product.id"
+            class="flex flex-col"
           >
-            <div
-              v-for="item in infiniteProductList"
-              :key="item.uniqueKey"
-              class="w-full sm:w-[calc((100%-1.5rem)/2)] lg:w-[calc((100%-3rem)/3)] shrink-0 flex flex-col product-card-wrapper"
-            >
-              <ProductCard
-                :id="item.isPrimarySet ? 'product-' + item.product.id : undefined"
-                :product="item.product"
-                @select-product="(p) => emit('select-product', p)"
-              />
-            </div>
+            <ProductCard
+              :product="product"
+              @select-product="(p) => emit('select-product', p)"
+            />
           </div>
         </div>
 
         <!-- Empty State -->
-        <div v-else class="text-center py-16 bg-white rounded-2xl border border-zinc-200 shadow-subtle">
-          <p class="text-sm text-zinc-600">Tidak ada produk yang cocok dengan kata kunci "{{ searchQuery }}".</p>
+        <div v-else class="text-center py-16 bg-white rounded-2xl border border-zinc-200 shadow-sm">
+          <p class="text-sm text-zinc-600">Tidak ada produk dalam kategori ini.</p>
           <button 
             type="button"
-            @click="searchQuery = ''; digitalFilter = 'all'"
+            @click="digitalFilter = 'all'"
             class="mt-3 text-xs text-blue-600 font-semibold hover:underline"
           >
-            Reset Filter Pencarian
+            Tampilkan Semua Produk
           </button>
         </div>
       </div>
 
-      <!-- VIEW 2: SERVICES INFINITE MARQUEE CAROUSEL -->
-      <div v-else id="jasa-software" class="mt-8">
+      <!-- VIEW 2: WEBSITE & APPS - CLEAN RESPONSIVE GRID (NO INFINITY LOOP) -->
+      <div v-else id="jasa-software">
         
-        <!-- Navigation Controls & Marquee Header for Services -->
-        <div v-if="filteredServices.length > 0" class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4 px-1">
-          <div class="flex items-center gap-2 text-xs font-mono flex-wrap">
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-zinc-100 text-zinc-700 font-bold border border-zinc-200">
-              {{ filteredServices.length }} Jasa Software
-            </span>
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 font-medium border border-blue-200">
-              <InfinityIcon class="w-3.5 h-3.5 text-blue-600" />
-              <span>Infinite Marquee Carousel</span>
-            </span>
-            <span class="hidden md:inline-flex items-center gap-1 text-[11px] text-zinc-400">
-              • Arahkan kursor ke kartu untuk jeda
-            </span>
-          </div>
-
-          <!-- Marquee Toggle & Navigation Arrow Buttons -->
-          <div class="flex items-center gap-2 w-full sm:w-auto justify-end">
-            <!-- Marquee Play/Pause Toggle -->
-            <button
-              type="button"
-              @click="toggleServiceMarquee"
-              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-zinc-200 bg-white text-xs font-semibold text-zinc-700 hover:bg-zinc-50 shadow-xs transition-colors cursor-pointer"
-              :title="isServiceMarqueePlaying ? 'Jeda marquee otomatis' : 'Jalankan marquee otomatis'"
-            >
-              <span 
-                class="w-2 h-2 rounded-full"
-                :class="isServiceMarqueePlaying && !isServiceHovered ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-400'"
-              ></span>
-              <Pause v-if="isServiceMarqueePlaying" class="w-3.5 h-3.5 text-zinc-600" />
-              <Play v-else class="w-3.5 h-3.5 text-zinc-600" />
-              <span class="text-xs">{{ isServiceMarqueePlaying ? (isServiceHovered ? 'Dijeda' : 'Marquee Aktif') : 'Putar Marquee' }}</span>
-            </button>
-
-            <!-- Arrow Navigation Buttons (Never disabled, infinite loop) -->
-            <button
-              type="button"
-              @click="scrollServiceCarousel('left')"
-              class="w-9 h-9 rounded-xl border border-zinc-200 bg-white flex items-center justify-center text-zinc-700 transition-all duration-150 shadow-xs hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500 active:scale-95 cursor-pointer"
-              aria-label="Geser jasa ke kiri"
-              title="Geser ke kiri (Loop)"
-            >
-              <ChevronLeft class="w-4 h-4" :stroke-width="2.25" />
-            </button>
-
-            <button
-              type="button"
-              @click="scrollServiceCarousel('right')"
-              class="w-9 h-9 rounded-xl border border-zinc-200 bg-white flex items-center justify-center text-zinc-700 transition-all duration-150 shadow-xs hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500 active:scale-95 cursor-pointer"
-              aria-label="Geser jasa ke kanan"
-              title="Geser ke kanan (Loop)"
-            >
-              <ChevronRight class="w-4 h-4" :stroke-width="2.25" />
-            </button>
-          </div>
+        <!-- Loading Skeleton State -->
+        <div v-if="isInitialLoading" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <ServiceCardSkeleton v-for="i in 3" :key="i" />
         </div>
 
-        <!-- Loading Skeleton State for Services -->
-        <div v-if="isInitialLoading" class="flex gap-6 overflow-x-auto py-3 px-1" style="scrollbar-width: none;">
-          <div 
-            v-for="i in 2" 
-            :key="i"
-            class="w-full sm:w-[500px] lg:w-[calc((100%-1.5rem)/2)] shrink-0 flex flex-col"
-          >
-            <ServiceCardSkeleton />
-          </div>
-        </div>
-
-        <!-- Carousel Track with Side Floating Arrows & Native Touch / Swipe Drag -->
+        <!-- Clean Services Grid -->
         <div 
           v-else-if="filteredServices.length > 0" 
-          class="relative group/service-carousel"
-          @mouseenter="handleServiceMouseEnter"
-          @mouseleave="handleServiceMouseLeave"
-          @touchstart="handleServiceTouchStart"
-          @touchend="handleServiceTouchEnd"
+          class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
         >
-          <!-- Floating Left Arrow for Extra Large Desktop Screens -->
-          <button
-            type="button"
-            @click="scrollServiceCarousel('left')"
-            class="hidden 2xl:flex absolute -left-12 top-1/2 -translate-y-1/2 z-30 w-11 h-11 rounded-full bg-white border border-zinc-200 text-zinc-800 shadow-elevated items-center justify-center hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-all focus:outline-none active:scale-95 cursor-pointer"
-            aria-label="Geser ke kiri"
-          >
-            <ChevronLeft class="w-5 h-5" :stroke-width="2.25" />
-          </button>
-
-          <!-- Floating Right Arrow for Extra Large Desktop Screens -->
-          <button
-            type="button"
-            @click="scrollServiceCarousel('right')"
-            class="hidden 2xl:flex absolute -right-12 top-1/2 -translate-y-1/2 z-30 w-11 h-11 rounded-full bg-white border border-zinc-200 text-zinc-800 shadow-elevated items-center justify-center hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-all focus:outline-none active:scale-95 cursor-pointer"
-            aria-label="Geser ke kanan"
-          >
-            <ChevronRight class="w-5 h-5" :stroke-width="2.25" />
-          </button>
-
-          <!-- Scrollable Infinite Container -->
           <div
-            ref="serviceCarouselRef"
-            class="flex gap-6 overflow-x-auto py-3 px-1"
-            style="scrollbar-width: none; -ms-overflow-style: none;"
+            v-for="service in filteredServices"
+            :key="service.id"
+            class="flex flex-col"
           >
-            <div
-              v-for="item in infiniteServiceList"
-              :key="item.uniqueKey"
-              class="w-full sm:w-[500px] lg:w-[calc((100%-1.5rem)/2)] shrink-0 flex flex-col service-card-wrapper"
-            >
-              <ServiceCard
-                :card-id="item.isPrimarySet ? 'service-' + item.service.id : undefined"
-                :service="item.service"
-                @select-service="(s) => emit('select-service', s)"
-              />
-            </div>
+            <ServiceCard
+              :card-id="'service-' + service.id"
+              :service="service"
+              @select-service="(s) => emit('select-service', s)"
+            />
           </div>
         </div>
 
-        <div v-else class="text-center py-16 bg-white rounded-xl border border-zinc-200">
-          <p class="text-sm text-zinc-500">Tidak ada layanan yang cocok dengan pencarian Anda.</p>
+        <!-- Empty State -->
+        <div v-else class="text-center py-16 bg-white rounded-2xl border border-zinc-200 shadow-sm">
+          <p class="text-sm text-zinc-600">Tidak ada layanan dalam kategori ini.</p>
           <button 
             type="button"
-            @click="searchQuery = ''; serviceFilter = 'all'"
+            @click="serviceFilter = 'all'"
             class="mt-3 text-xs text-blue-600 font-semibold hover:underline"
           >
-            Reset Filter Pencarian
+            Tampilkan Semua Layanan
           </button>
         </div>
       </div>
