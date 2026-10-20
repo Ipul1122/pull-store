@@ -1,0 +1,11 @@
+services:
+  pull-store:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-https://djqqfgumujtkpaqggqza.supabase.co}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-sb_publishable_QfPUNg7oBEpQEuRkF_5zaQ_WR51dpVC}
+    ports:
+      - "8080:80"
+    restart: unless-stopped
