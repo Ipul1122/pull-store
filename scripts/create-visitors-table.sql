@@ -30,3 +30,8 @@ ON public.visitors FOR INSERT WITH CHECK (true);
 DROP POLICY IF EXISTS "Allow public select on visitors" ON public.visitors;
 CREATE POLICY "Allow public select on visitors" 
 ON public.visitors FOR SELECT USING (true);
+
+-- Izinkan penghapusan log kunjungan oleh admin
+DROP POLICY IF EXISTS "Allow public delete on visitors" ON public.visitors;
+CREATE POLICY "Allow public delete on visitors" 
+ON public.visitors FOR DELETE USING (true);

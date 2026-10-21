@@ -25,6 +25,18 @@ const searchQuery = ref('')
 const filterDevice = ref('all')
 const isTableMissing = ref(false)
 const isSqlCopied = ref(false)
+const isDeleteSqlCopied = ref(false)
+const showDeleteHelp = ref(false)
+const isDeleting = ref(false)
+
+const toastMessage = ref('')
+const toastType = ref<'success' | 'error'>('success')
+
+const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
+  toastMessage.value = msg
+  toastType.value = type
+  setTimeout(() => { toastMessage.value = '' }, 4000)
+}
 
 const currentPage = ref(1)
 const pageSize = ref(15)
@@ -54,25 +66,46 @@ DROP POLICY IF EXISTS "Allow public insert on visitors" ON public.visitors;
 CREATE POLICY "Allow public insert on visitors" ON public.visitors FOR INSERT WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Allow public select on visitors" ON public.visitors;
-CREATE POLICY "Allow public select on visitors" ON public.visitors FOR SELECT USING (true);`
+CREATE POLICY "Allow public select on visitors" ON public.visitors FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Allow public delete on visitors" ON public.visitors;
+CREATE POLICY "Allow public delete on visitors" ON public.visitors FOR DELETE USING (true);`
+
+const sqlDeletePolicyCode = `DROP POLICY IF EXISTS "Allow public delete on visitors" ON public.visitors;
+CREATE POLICY "Allow public delete on visitors" ON public.visitors FOR DELETE USING (true);`
+
+const copyToClipboard = async (text: string) => {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    await navigator.clipboard.writeText(text)
+  } else {
+    const input = document.createElement('textarea')
+    input.value = text
+    document.body.appendChild(input)
+    input.select()
+    document.execCommand('copy')
+    document.body.removeChild(input)
+  }
+}
 
 const copySqlCode = async () => {
   try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(sqlSetupCode)
-    } else {
-      const input = document.createElement('textarea')
-      input.value = sqlSetupCode
-      document.body.appendChild(input)
-      input.select()
-      document.execCommand('copy')
-      document.body.removeChild(input)
-    }
+    await copyToClipboard(sqlSetupCode)
     isSqlCopied.value = true
     setTimeout(() => { isSqlCopied.value = false }, 3000)
   } catch {
     isSqlCopied.value = true
     setTimeout(() => { isSqlCopied.value = false }, 3000)
+  }
+}
+
+const copyDeleteSqlCode = async () => {
+  try {
+    await copyToClipboard(sqlDeletePolicyCode)
+    isDeleteSqlCopied.value = true
+    setTimeout(() => { isDeleteSqlCopied.value = false }, 3000)
+  } catch {
+    isDeleteSqlCopied.value = true
+    setTimeout(() => { isDeleteSqlCopied.value = false }, 3000)
   }
 }
 
@@ -159,19 +192,76 @@ const formatDate = (dateStr?: string) => {
 }
 
 const clearLogs = async () => {
-  if (!confirm('Hapus seluruh riwayat log pengunjung?')) return
+  if (!confirm('Hapus SELURUH riwayat log pengunjung secara permanen dari database?')) return
   if (!supabase) return
+  isDeleting.value = true
   try {
-    await supabase.from('visitors').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+    const { data, error } = await supabase
+      .from('visitors')
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000')
+      .select()
+
+    if (error) throw error
+
+    // Cek apakah data benar-benar terhapus di Supabase
+    if (!data || data.length === 0) {
+      showToast('Izin DELETE belum aktif di Supabase! Salin & jalankan SQL Izin Hapus di bawah.', 'error')
+      showDeleteHelp.value = true
+      return
+    }
+
     visitors.value = []
+    showToast(`Berhasil menghapus ${data.length} log pengunjung permanen.`)
+    showDeleteHelp.value = false
   } catch (err: any) {
-    alert('Gagal menghapus log: ' + err.message)
+    showToast('Gagal menghapus log: ' + err.message, 'error')
+  } finally {
+    isDeleting.value = false
+  }
+}
+
+const deleteSingleVisitor = async (id?: string, info = '') => {
+  if (!id) return
+  if (!confirm(`Hapus log kunjungan ini (${info})?`)) return
+  if (!supabase) return
+  
+  isDeleting.value = true
+  try {
+    const { data, error } = await supabase
+      .from('visitors')
+      .delete()
+      .eq('id', id)
+      .select()
+
+    if (error) throw error
+
+    if (!data || data.length === 0) {
+      showToast('Izin DELETE belum aktif di Supabase! Salin & jalankan SQL Izin Hapus di bawah.', 'error')
+      showDeleteHelp.value = true
+      return
+    }
+
+    visitors.value = visitors.value.filter(v => v.id !== id)
+    showToast('1 baris log pengunjung berhasil dihapus.')
+    showDeleteHelp.value = false
+  } catch (err: any) {
+    showToast('Gagal menghapus: ' + err.message, 'error')
+  } finally {
+    isDeleting.value = false
   }
 }
 </script>
 
 <template>
   <div class="max-w-6xl mx-auto space-y-6">
+    <!-- Toasts -->
+    <div v-if="toastMessage" class="fixed top-5 right-5 z-50 p-4 rounded-xl text-white text-xs font-semibold shadow-2xl flex items-center gap-2 animate-fadeIn" :class="toastType === 'error' ? 'bg-red-600' : 'bg-emerald-600'">
+      <Check v-if="toastType === 'success'" class="w-4 h-4" />
+      <AlertTriangle v-else class="w-4 h-4" />
+      <span>{{ toastMessage }}</span>
+    </div>
+
     <!-- Header -->
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-800">
       <div>
@@ -242,6 +332,52 @@ const clearLogs = async () => {
           <span>Buka SQL Editor Supabase</span>
           <ExternalLink class="w-3.5 h-3.5" />
         </a>
+      </div>
+    </div>
+
+    <!-- Banner Bantuan jika Izin Hapus (RLS DELETE) Belum Aktif di Supabase -->
+    <div v-if="showDeleteHelp" class="p-5 rounded-2xl bg-red-950/40 border border-red-800/80 text-red-200 space-y-3 animate-fadeIn">
+      <div class="flex items-start gap-3">
+        <AlertTriangle class="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+        <div class="flex-1 text-xs leading-relaxed">
+          <h3 class="font-bold text-sm text-red-300">Data Muncul Lagi Setelah Dihapus? (Izin DELETE RLS Supabase)</h3>
+          <p class="text-zinc-300 mt-1">
+            Data muncul lagi saat di-refresh karena di database Supabase PostgreSQL, <strong>Row Level Security (RLS)</strong> belum memiliki policy <code>DELETE</code>. Jalankan query SQL singkat di bawah ini di <strong>SQL Editor Supabase</strong> agar penghapusan data tersimpan permanen:
+          </p>
+          <div class="mt-2.5 p-3 rounded-xl bg-black/70 border border-red-900/50 font-mono text-[11px] text-red-200 select-all">
+            {{ sqlDeletePolicyCode }}
+          </div>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-3 pt-1">
+        <button
+          type="button"
+          @click="copyDeleteSqlCode"
+          class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-red-600 hover:bg-red-500 text-white transition-colors cursor-pointer"
+        >
+          <Check v-if="isDeleteSqlCopied" class="w-4 h-4" />
+          <Copy v-else class="w-4 h-4" />
+          <span>{{ isDeleteSqlCopied ? 'Query Tersalin!' : 'Salin Query Izin Hapus (1-Klik)' }}</span>
+        </button>
+
+        <a
+          href="https://supabase.com/dashboard/project/djqqfgumujtkpaqggqza/sql/new"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 transition-colors"
+        >
+          <span>Buka SQL Editor Supabase</span>
+          <ExternalLink class="w-3.5 h-3.5" />
+        </a>
+
+        <button
+          type="button"
+          @click="showDeleteHelp = false"
+          class="text-xs text-zinc-400 hover:text-white ml-auto"
+        >
+          Tutup Bantuan
+        </button>
       </div>
     </div>
 
@@ -342,9 +478,10 @@ const clearLogs = async () => {
               <th class="py-3 px-4 font-medium">Sumber / Referrer</th>
               <th class="py-3 px-4 font-medium">Halaman</th>
               <th class="py-3 px-4 font-medium">Provider / ISP</th>
+              <th class="py-3 px-4 font-medium text-right">Aksi</th>
             </tr>
           </thead>
-          <TableSkeleton v-if="isLoading" :rows="6" :cols="6" />
+          <TableSkeleton v-if="isLoading" :rows="6" :cols="7" />
           <tbody v-else class="divide-y divide-zinc-800/60 font-sans">
             <tr v-for="log in paginatedList" :key="log.id" class="hover:bg-zinc-800/20 transition-colors">
               <td class="py-3 px-4 font-mono text-zinc-300 whitespace-nowrap">
@@ -384,6 +521,17 @@ const clearLogs = async () => {
               </td>
               <td class="py-3 px-4 text-zinc-400 text-[11px] truncate max-w-[150px]">
                 {{ log.isp || '-' }}
+              </td>
+              <td class="py-3 px-4 text-right whitespace-nowrap">
+                <button
+                  type="button"
+                  @click="deleteSingleVisitor(log.id, `${log.city || 'Pengunjung'} (${log.ip || '-'})`)"
+                  :disabled="isDeleting"
+                  class="p-1.5 rounded-lg bg-zinc-800 text-zinc-400 hover:text-red-400 hover:bg-red-950/40 transition-colors disabled:opacity-40"
+                  title="Hapus baris log ini"
+                >
+                  <Trash2 class="w-3.5 h-3.5" />
+                </button>
               </td>
             </tr>
           </tbody>
