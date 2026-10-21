@@ -24,7 +24,7 @@ const handleLogin = () => {
     if (success) {
       router.push('/admin/dashboard')
     } else {
-      errorMsg.value = 'Password admin salah. Coba: pulladmin2026'
+      errorMsg.value = 'Anda tidak berhak akses!'
     }
     isLoading.value = false
   }, 400)

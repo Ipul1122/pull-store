@@ -11,17 +11,67 @@ import {
   MapPin, 
   Clock, 
   Search,
-  Trash2
+  Trash2,
+  AlertTriangle,
+  Copy,
+  Check,
+  ExternalLink
 } from 'lucide-vue-next'
 
 const visitors = ref<VisitorLog[]>([])
 const isLoading = ref(false)
 const searchQuery = ref('')
 const filterDevice = ref('all')
+const isTableMissing = ref(false)
+const isSqlCopied = ref(false)
+
+const sqlSetupCode = `CREATE TABLE IF NOT EXISTS public.visitors (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()),
+  page_url TEXT,
+  referrer TEXT,
+  device TEXT,
+  browser TEXT,
+  os TEXT,
+  city TEXT,
+  region TEXT,
+  country TEXT,
+  isp TEXT,
+  ip TEXT
+);
+
+ALTER TABLE public.visitors ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow public insert on visitors" ON public.visitors;
+CREATE POLICY "Allow public insert on visitors" ON public.visitors FOR INSERT WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow public select on visitors" ON public.visitors;
+CREATE POLICY "Allow public select on visitors" ON public.visitors FOR SELECT USING (true);`
+
+const copySqlCode = async () => {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(sqlSetupCode)
+    } else {
+      const input = document.createElement('textarea')
+      input.value = sqlSetupCode
+      document.body.appendChild(input)
+      input.select()
+      document.execCommand('copy')
+      document.body.removeChild(input)
+    }
+    isSqlCopied.value = true
+    setTimeout(() => { isSqlCopied.value = false }, 3000)
+  } catch {
+    isSqlCopied.value = true
+    setTimeout(() => { isSqlCopied.value = false }, 3000)
+  }
+}
 
 const fetchVisitors = async () => {
   if (!supabase) return
   isLoading.value = true
+  isTableMissing.value = false
   try {
     const { data, error } = await supabase
       .from('visitors')
@@ -29,10 +79,17 @@ const fetchVisitors = async () => {
       .order('created_at', { ascending: false })
       .limit(100)
 
-    if (!error && data) {
+    if (error) {
+      if (error.code === 'PGRST204' || error.code === 'PGRST205' || error.message?.includes('Could not find') || error.message?.includes('does not exist')) {
+        isTableMissing.value = true
+      }
+    } else if (data) {
       visitors.value = data
     }
-  } catch (err) {
+  } catch (err: any) {
+    if (err?.message?.includes('Could not find') || err?.message?.includes('does not exist') || err?.status === 404) {
+      isTableMissing.value = true
+    }
     console.warn('Gagal memuat log pengunjung:', err)
   } finally {
     isLoading.value = false
@@ -137,6 +194,41 @@ const clearLogs = async () => {
         >
           <Trash2 class="w-4 h-4" />
         </button>
+      </div>
+    </div>
+
+    <!-- Setup Banner jika tabel visitors belum dibuat di Supabase -->
+    <div v-if="isTableMissing" class="p-5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 space-y-3">
+      <div class="flex items-start gap-3">
+        <AlertTriangle class="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+        <div class="flex-1 text-xs leading-relaxed">
+          <h3 class="font-bold text-sm text-amber-300">Tabel 'visitors' Belum Dibuat di Supabase (Error 404)</h3>
+          <p class="text-zinc-300 mt-1">
+            Status 404 muncul karena tabel <code class="bg-zinc-800 px-1.5 py-0.5 rounded text-amber-300">visitors</code> belum ada di database PostgreSQL Supabase Anda. Anda hanya perlu menyalin dan menjalankan query SQL di bawah ini <strong>sekali saja</strong> di SQL Editor Supabase.
+          </p>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-3 pt-2">
+        <button
+          type="button"
+          @click="copySqlCode"
+          class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-zinc-950 transition-colors cursor-pointer"
+        >
+          <Check v-if="isSqlCopied" class="w-4 h-4" />
+          <Copy v-else class="w-4 h-4" />
+          <span>{{ isSqlCopied ? 'Query SQL Tersalin!' : 'Salin Query SQL (1-Klik)' }}</span>
+        </button>
+
+        <a
+          href="https://supabase.com/dashboard/project/djqqfgumujtkpaqggqza/sql/new"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 text-white border border-zinc-700 transition-colors"
+        >
+          <span>Buka SQL Editor Supabase</span>
+          <ExternalLink class="w-3.5 h-3.5" />
+        </a>
       </div>
     </div>
 
