@@ -824,7 +824,7 @@ export const SERVICES: ServiceItem[] = [
   },
   {
     id: 'svc-apk-kasir',
-    name: 'Aplikasi Android Kasir & Stok (100% Offline Tanpa Kuota)',
+    name: 'Aplikasi Kasir & Stok Android (100% Offline Tanpa Kuota)',
     category: 'apk-offline',
     categoryLabel: 'Kasir Toko & Retail',
     startingPrice: 700000,
@@ -847,11 +847,11 @@ export const SERVICES: ServiceItem[] = [
     badge: 'Mulai 700Rb • Terlaris UMKM',
     iconName: 'Smartphone',
     recommended: true,
-    suitableFor: 'Toko Kelontong, Cafe / Resto, Toko Baju, Bengkel, Apotek, Counter HP, & Gudang Distributor'
+    suitableFor: 'Toko Kelontong, Cafe / Resto, Toko Baju, Bengkel, Apotek, Counter HP, Retail UMKM, dll.'
   },
   {
     id: 'svc-website-statis',
-    name: 'Website Jualan Statis & Company Profile (Fast & Clean)',
+    name: 'Website Jualan Statis (Fast & Clean)',
     category: 'landing-page',
     categoryLabel: 'Website Statis & Landing Page',
     startingPrice: 850000,
@@ -875,7 +875,7 @@ export const SERVICES: ServiceItem[] = [
     badge: 'Start 850Rb • Include Domain & Hosting',
     iconName: 'Globe',
     recommended: false,
-    suitableFor: 'Pemilik Produk, UMKM Jasa & Barang, Toko Online, Kantor Notaris/Pengacara, Agen Properti, & Bisnis Kreatif'
+    suitableFor: 'Company Profile, Portofolio, Landing Page Produk, Web Promosi UMKM, dll.'
   },
   {
     id: 'svc-website-dinamis',
@@ -910,10 +910,10 @@ export const SERVICES: ServiceItem[] = [
     name: 'Sistem Informasi & Manajemen Operasional Kustom',
     category: 'custom-web',
     categoryLabel: 'Sistem Bisnis & Operasional',
-    startingPrice: 3850000,
-    priceDisplay: 'Mulai Rp 3.850.000',
-    timeline: '3 - 5 Minggu (21 - 35 Hari Kerja)',
-    tagline: 'Ubah alur kerja manual serba kertas & excel yang berantakan menjadi otomatis. Pantau absensi, data pelanggan, dan keuangan tim secara terpusat.',
+    startingPrice: 0,
+    priceDisplay: 'Sesuai dengan yang Anda Butuhkan (Konsultasi Free)',
+    timeline: 'Fleksibel (Sesuai Skala Fitur)',
+    tagline: 'Ubah alur kerja manual serba kertas & excel yang berantakan menjadi otomatis. Sistem dibuat khusus sesuai kebutuhan spesifik bisnis Anda.',
     deliverables: [
       'Dibuat Sesuai SOP Anda: Fitur dirancang pas dengan alur bisnis Anda (absensi GPS, approval, stok multi-cabang).',
       'Cegah Kecurangan & Error: Hilangkan dokumen hilang dan hemat puluhan jam rekap manual tim per minggu.',
@@ -928,10 +928,10 @@ export const SERVICES: ServiceItem[] = [
       'Full Source Code & Database Milik Anda'
     ],
     maintenanceWarranty: 'Garansi 3 Bulan Free Maintenance & Bugfix (setelahnya ada opsi biaya tambahan/maintenance opsional)',
-    badge: 'Solusi Operasional Kustom',
+    badge: 'Konsultasi Free • Solusi Kustom',
     iconName: 'Layers',
     recommended: false,
-    suitableFor: 'Perusahaan Berkembang, Kantor Banyak Cabang, Pengelola Properti/Kos, Sekolah/Yayasan, & Organisasi'
+    suitableFor: 'Perusahaan Berkembang, Kantor Multi-Cabang, Pengelola Properti/Kos, Sekolah/Yayasan, & Organisasi'
   }
 ]
 

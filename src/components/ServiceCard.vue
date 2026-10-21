@@ -15,7 +15,8 @@ import {
   CheckCheck, 
   ShieldCheck, 
   ArrowRight,
-  GraduationCap
+  GraduationCap,
+  Sparkles
 } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -137,13 +138,25 @@ const onConsultClick = () => {
         {{ service.tagline }}
       </p>
 
+      <!-- Suitable For (Target Audience / Use Case) -->
+      <div v-if="service.suitableFor" class="mt-3.5 p-3 rounded-xl bg-blue-50/70 border border-blue-100 flex items-start gap-2.5">
+        <Sparkles class="w-4 h-4 text-blue-600 shrink-0 mt-0.5" :stroke-width="2" />
+        <div class="text-xs leading-relaxed">
+          <span class="font-bold text-zinc-950">Cocok untuk:</span>
+          <span class="ml-1 text-zinc-600 font-medium">{{ service.suitableFor }}</span>
+        </div>
+      </div>
+
       <!-- Clean Pricing & Specs Card -->
       <div class="mt-5 p-4 rounded-xl bg-zinc-50 border border-zinc-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <span class="text-[10px] font-mono uppercase tracking-wider text-zinc-400 block">
             Estimasi Investasi
           </span>
-          <div class="text-2xl font-bold font-mono text-zinc-950 tracking-tight mt-0.5">
+          <div 
+            class="font-bold tracking-tight mt-0.5"
+            :class="service.priceDisplay && service.priceDisplay.length > 20 ? 'text-base sm:text-lg font-sans text-blue-600 leading-snug' : 'text-2xl font-mono text-zinc-950'"
+          >
             {{ service.priceDisplay || formatRupiah(service.startingPrice) }}
           </div>
         </div>
