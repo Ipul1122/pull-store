@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { supabase } from '../../lib/supabase'
 import type { VisitorLog } from '../../lib/tracker'
 import TableSkeleton from '../../components/skeletons/TableSkeleton.vue'
+import AdminPagination from '../../components/admin/AdminPagination.vue'
 import { 
   Users, 
   RefreshCw, 
@@ -24,6 +25,13 @@ const searchQuery = ref('')
 const filterDevice = ref('all')
 const isTableMissing = ref(false)
 const isSqlCopied = ref(false)
+
+const currentPage = ref(1)
+const pageSize = ref(15)
+
+watch([searchQuery, filterDevice], () => {
+  currentPage.value = 1
+})
 
 const sqlSetupCode = `CREATE TABLE IF NOT EXISTS public.visitors (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -132,6 +140,11 @@ const filteredList = computed(() => {
 
     return matchSearch && matchDevice
   })
+})
+
+const paginatedList = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return filteredList.value.slice(start, start + pageSize.value)
 })
 
 const formatDate = (dateStr?: string) => {
@@ -333,7 +346,7 @@ const clearLogs = async () => {
           </thead>
           <TableSkeleton v-if="isLoading" :rows="6" :cols="6" />
           <tbody v-else class="divide-y divide-zinc-800/60 font-sans">
-            <tr v-for="log in filteredList" :key="log.id" class="hover:bg-zinc-800/20 transition-colors">
+            <tr v-for="log in paginatedList" :key="log.id" class="hover:bg-zinc-800/20 transition-colors">
               <td class="py-3 px-4 font-mono text-zinc-300 whitespace-nowrap">
                 {{ formatDate(log.created_at) }}
               </td>
@@ -376,6 +389,15 @@ const clearLogs = async () => {
           </tbody>
         </table>
       </div>
+
+      <!-- Pagination Component -->
+      <AdminPagination
+        v-if="filteredList.length > 0"
+        v-model:current-page="currentPage"
+        v-model:page-size="pageSize"
+        :total-items="filteredList.length"
+        :page-size-options="[10, 15, 25, 50, 100]"
+      />
 
       <!-- Empty State -->
       <div v-else class="text-center py-16 p-6">

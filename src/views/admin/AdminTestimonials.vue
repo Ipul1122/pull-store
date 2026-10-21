@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { supabase } from '../../lib/supabase'
 import { useTestimonials } from '../../composables/useTestimonials'
 import { SPREADSHEET_TRANSPARENCY_URL, type TestimonialItem } from '../../data/testimonials'
 import TableSkeleton from '../../components/skeletons/TableSkeleton.vue'
+import AdminPagination from '../../components/admin/AdminPagination.vue'
 import { 
   Plus, 
   Search, 
@@ -35,6 +36,28 @@ interface FormState {
 const { testimonials, isLoading, isUsingRemote, refetch } = useTestimonials()
 
 const searchQuery = ref('')
+const currentPage = ref(1)
+const pageSize = ref(10)
+
+const filteredTestimonials = computed(() => {
+  if (!searchQuery.value) return testimonials.value
+  const q = searchQuery.value.toLowerCase()
+  return testimonials.value.filter(t => 
+    t.clientName.toLowerCase().includes(q) || 
+    t.orderName.toLowerCase().includes(q) ||
+    (t.warranty && t.warranty.toLowerCase().includes(q)) ||
+    (t.notes && t.notes.toLowerCase().includes(q))
+  )
+})
+
+const paginatedTestimonials = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return filteredTestimonials.value.slice(start, start + pageSize.value)
+})
+
+watch(searchQuery, () => {
+  currentPage.value = 1
+})
 const isModalOpen = ref(false)
 const isSaving = ref(false)
 const modalMode = ref<'create' | 'edit'>('create')
@@ -266,7 +289,7 @@ const deleteTestimonial = async (id: string, clientName: string) => {
           <TableSkeleton v-if="isLoading" :rows="5" :cols="7" />
           <tbody v-else class="divide-y divide-zinc-800/60">
             <tr 
-              v-for="item in testimonials.filter(t => !searchQuery || t.clientName.toLowerCase().includes(searchQuery.toLowerCase()) || t.orderName.toLowerCase().includes(searchQuery.toLowerCase()))" 
+              v-for="item in paginatedTestimonials" 
               :key="item.id"
               class="hover:bg-zinc-800/20 transition-colors"
             >
@@ -316,9 +339,23 @@ const deleteTestimonial = async (id: string, clientName: string) => {
                 </div>
               </td>
             </tr>
+            <tr v-if="filteredTestimonials.length === 0">
+              <td colspan="7" class="py-12 text-center text-zinc-500 font-mono text-xs">
+                Tidak ada testimonial yang sesuai dengan pencarian.
+              </td>
+            </tr>
           </tbody>
         </table>
       </div>
+
+      <!-- Pagination Component -->
+      <AdminPagination
+        v-if="!isLoading && filteredTestimonials.length > 0"
+        v-model:current-page="currentPage"
+        v-model:page-size="pageSize"
+        :total-items="filteredTestimonials.length"
+        :page-size-options="[10, 20, 50, 100]"
+      />
     </div>
 
     <!-- Modal Form (Tambah / Edit Testimonial) -->

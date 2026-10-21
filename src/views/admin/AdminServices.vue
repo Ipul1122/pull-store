@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { supabase } from '../../lib/supabase'
 import { useCatalog } from '../../composables/useCatalog'
+import AdminPagination from '../../components/admin/AdminPagination.vue'
 import type { ServiceItem } from '../../types'
 import { 
   Plus, 
+  Search,
   Edit3, 
   Trash2, 
   Check, 
@@ -17,6 +19,31 @@ import {
 } from 'lucide-vue-next'
 
 const { services, isLoading, refetch } = useCatalog()
+
+const searchQuery = ref('')
+const currentPage = ref(1)
+const pageSize = ref(6)
+
+const filteredServices = computed(() => {
+  if (!searchQuery.value) return services.value
+  const q = searchQuery.value.toLowerCase()
+  return services.value.filter(s => 
+    s.name.toLowerCase().includes(q) ||
+    (s.categoryLabel && s.categoryLabel.toLowerCase().includes(q)) ||
+    (s.tagline && s.tagline.toLowerCase().includes(q)) ||
+    (s.suitableFor && s.suitableFor.toLowerCase().includes(q)) ||
+    (s.badge && s.badge.toLowerCase().includes(q))
+  )
+})
+
+const paginatedServices = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return filteredServices.value.slice(start, start + pageSize.value)
+})
+
+watch(searchQuery, () => {
+  currentPage.value = 1
+})
 
 const isModalOpen = ref(false)
 const isSaving = ref(false)
@@ -197,6 +224,19 @@ const deleteService = async (id: string, name: string) => {
       </div>
     </div>
 
+    <!-- Search & Filter Bar -->
+    <div class="flex items-center justify-between gap-4">
+      <div class="relative w-full sm:w-80">
+        <Search class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+        <input
+          v-model="searchQuery"
+          type="text"
+          placeholder="Cari layanan (Kasir, Landing Page, Skripsi)..."
+          class="w-full pl-9 pr-4 py-2 rounded-xl bg-zinc-900 border border-zinc-800 focus:border-emerald-500 text-xs text-white outline-none font-mono"
+        />
+      </div>
+    </div>
+
     <!-- Skeleton Loading Cards -->
     <div v-if="isLoading" class="grid grid-cols-1 md:grid-cols-2 gap-5">
       <div v-for="i in 4" :key="i" class="p-6 rounded-2xl bg-zinc-900/40 border border-zinc-800 animate-pulse space-y-4">
@@ -214,79 +254,97 @@ const deleteService = async (id: string, name: string) => {
       </div>
     </div>
 
+    <!-- Empty State -->
+    <div v-else-if="filteredServices.length === 0" class="p-12 text-center rounded-2xl bg-zinc-900/60 border border-zinc-800">
+      <p class="text-zinc-500 font-mono text-xs">
+        Tidak ada layanan jasa yang sesuai dengan pencarian "{{ searchQuery }}".
+      </p>
+    </div>
+
     <!-- Services Grid Cards -->
-    <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-5">
-      <div 
-        v-for="svc in services" 
-        :key="svc.id"
-        class="p-6 rounded-2xl bg-zinc-900/60 border border-zinc-800 hover:border-zinc-700 transition-all flex flex-col justify-between"
-      >
-        <div>
-          <div class="flex items-start justify-between gap-3 mb-2">
-            <span class="text-[11px] font-mono text-blue-400 uppercase font-semibold">
-              {{ svc.categoryLabel }}
-            </span>
-            <span v-if="svc.badge" class="px-2 py-0.5 rounded text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800">
-              {{ svc.badge }}
-            </span>
-          </div>
-
-          <h3 class="text-lg font-bold text-white tracking-tight">
-            {{ svc.name }}
-          </h3>
-          <p class="text-xs text-zinc-400 mt-1.5 leading-relaxed line-clamp-2">
-            {{ svc.tagline }}
-          </p>
-
-          <!-- Price & Timeline Box -->
-          <div class="mt-4 p-3.5 rounded-xl bg-zinc-950/70 border border-zinc-800 flex items-center justify-between">
-            <div>
-              <span class="text-[10px] font-mono text-zinc-500 uppercase block">Investasi:</span>
-              <span class="text-base font-bold font-mono text-emerald-400">
-                {{ svc.priceDisplay || formatRupiah(svc.startingPrice) }}
+    <div v-else class="space-y-6">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div 
+          v-for="svc in paginatedServices" 
+          :key="svc.id"
+          class="p-6 rounded-2xl bg-zinc-900/60 border border-zinc-800 hover:border-zinc-700 transition-all flex flex-col justify-between"
+        >
+          <div>
+            <div class="flex items-start justify-between gap-3 mb-2">
+              <span class="text-[11px] font-mono text-blue-400 uppercase font-semibold">
+                {{ svc.categoryLabel }}
+              </span>
+              <span v-if="svc.badge" class="px-2 py-0.5 rounded text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800">
+                {{ svc.badge }}
               </span>
             </div>
-            <div class="text-right">
-              <span class="text-[10px] font-mono text-zinc-500 uppercase block">Timeline:</span>
-              <span class="text-xs font-mono text-zinc-300 flex items-center gap-1">
-                <Clock class="w-3 h-3 text-zinc-400" />
-                {{ svc.timeline }}
-              </span>
+
+            <h3 class="text-lg font-bold text-white tracking-tight">
+              {{ svc.name }}
+            </h3>
+            <p class="text-xs text-zinc-400 mt-1.5 leading-relaxed line-clamp-2">
+              {{ svc.tagline }}
+            </p>
+
+            <!-- Price & Timeline Box -->
+            <div class="mt-4 p-3.5 rounded-xl bg-zinc-950/70 border border-zinc-800 flex items-center justify-between">
+              <div>
+                <span class="text-[10px] font-mono text-zinc-500 uppercase block">Investasi:</span>
+                <span class="text-base font-bold font-mono text-emerald-400">
+                  {{ svc.priceDisplay || formatRupiah(svc.startingPrice) }}
+                </span>
+              </div>
+              <div class="text-right">
+                <span class="text-[10px] font-mono text-zinc-500 uppercase block">Timeline:</span>
+                <span class="text-xs font-mono text-zinc-300 flex items-center gap-1">
+                  <Clock class="w-3 h-3 text-zinc-400" />
+                  {{ svc.timeline }}
+                </span>
+              </div>
+            </div>
+
+            <!-- Warranty Pill -->
+            <div v-if="svc.maintenanceWarranty" class="mt-3 p-2 rounded-lg bg-blue-950/40 border border-blue-800/40 text-[11px] text-blue-300 flex items-center gap-1.5">
+              <ShieldCheck class="w-3.5 h-3.5 text-blue-400 shrink-0" />
+              <span class="truncate">{{ svc.maintenanceWarranty }}</span>
             </div>
           </div>
 
-          <!-- Warranty Pill -->
-          <div v-if="svc.maintenanceWarranty" class="mt-3 p-2 rounded-lg bg-blue-950/40 border border-blue-800/40 text-[11px] text-blue-300 flex items-center gap-1.5">
-            <ShieldCheck class="w-3.5 h-3.5 text-blue-400 shrink-0" />
-            <span class="truncate">{{ svc.maintenanceWarranty }}</span>
-          </div>
-        </div>
+          <div class="mt-6 pt-4 border-t border-zinc-800/80 flex items-center justify-between">
+            <span class="text-[11px] text-zinc-500 truncate max-w-[200px]">
+              {{ svc.suitableFor }}
+            </span>
 
-        <div class="mt-6 pt-4 border-t border-zinc-800/80 flex items-center justify-between">
-          <span class="text-[11px] text-zinc-500 truncate max-w-[200px]">
-            {{ svc.suitableFor }}
-          </span>
-
-          <div class="flex items-center gap-2">
-            <button
-              type="button"
-              @click="openEditModal(svc)"
-              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-white transition-colors"
-            >
-              <Edit3 class="w-3.5 h-3.5" />
-              <span>Edit</span>
-            </button>
-            <button
-              type="button"
-              @click="deleteService(svc.id, svc.name)"
-              class="p-1.5 rounded-lg bg-zinc-800 text-red-400 hover:text-red-300 hover:bg-red-950/40 transition-colors"
-              title="Hapus Layanan"
-            >
-              <Trash2 class="w-3.5 h-3.5" />
-            </button>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                @click="openEditModal(svc)"
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-white transition-colors"
+              >
+                <Edit3 class="w-3.5 h-3.5" />
+                <span>Edit</span>
+              </button>
+              <button
+                type="button"
+                @click="deleteService(svc.id, svc.name)"
+                class="p-1.5 rounded-lg bg-zinc-800 text-red-400 hover:text-red-300 hover:bg-red-950/40 transition-colors"
+                title="Hapus Layanan"
+              >
+                <Trash2 class="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         </div>
       </div>
+
+      <!-- Pagination Component -->
+      <AdminPagination
+        v-if="!isLoading && filteredServices.length > 0"
+        v-model:current-page="currentPage"
+        v-model:page-size="pageSize"
+        :total-items="filteredServices.length"
+        :page-size-options="[4, 6, 10, 20]"
+      />
     </div>
 
     <!-- Modal Form (Tambah / Edit Layanan) -->

@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { supabase } from '../../lib/supabase'
 import { useCatalog } from '../../composables/useCatalog'
 import TableSkeleton from '../../components/skeletons/TableSkeleton.vue'
+import AdminPagination from '../../components/admin/AdminPagination.vue'
 import type { ProductItem } from '../../types'
 import { 
   Plus, 
@@ -19,6 +20,28 @@ import {
 const { products, isLoading, refetch } = useCatalog()
 
 const searchQuery = ref('')
+const currentPage = ref(1)
+const pageSize = ref(10)
+
+const filteredProducts = computed(() => {
+  if (!searchQuery.value) return products.value
+  const q = searchQuery.value.toLowerCase()
+  return products.value.filter(p => 
+    p.name.toLowerCase().includes(q) ||
+    p.category.toLowerCase().includes(q) ||
+    (p.badge && p.badge.toLowerCase().includes(q)) ||
+    (p.accountType && p.accountType.toLowerCase().includes(q))
+  )
+})
+
+const paginatedProducts = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return filteredProducts.value.slice(start, start + pageSize.value)
+})
+
+watch(searchQuery, () => {
+  currentPage.value = 1
+})
 const isModalOpen = ref(false)
 const isSaving = ref(false)
 const modalMode = ref<'create' | 'edit'>('create')
@@ -247,7 +270,7 @@ const toggleStock = async (prod: ProductItem) => {
           <TableSkeleton v-if="isLoading" :rows="5" :cols="6" />
           <tbody v-else class="divide-y divide-zinc-800/60">
             <tr 
-              v-for="prod in products.filter(p => !searchQuery || p.name.toLowerCase().includes(searchQuery.toLowerCase()))" 
+              v-for="prod in paginatedProducts" 
               :key="prod.id"
               class="hover:bg-zinc-800/20 transition-colors"
             >
@@ -302,9 +325,23 @@ const toggleStock = async (prod: ProductItem) => {
                 </div>
               </td>
             </tr>
+            <tr v-if="filteredProducts.length === 0">
+              <td colspan="6" class="py-12 text-center text-zinc-500 font-mono text-xs">
+                Tidak ada produk digital yang sesuai dengan pencarian.
+              </td>
+            </tr>
           </tbody>
         </table>
       </div>
+
+      <!-- Pagination Component -->
+      <AdminPagination
+        v-if="!isLoading && filteredProducts.length > 0"
+        v-model:current-page="currentPage"
+        v-model:page-size="pageSize"
+        :total-items="filteredProducts.length"
+        :page-size-options="[10, 20, 50, 100]"
+      />
     </div>
 
     <!-- Modal Form (Tambah / Edit Produk) -->
