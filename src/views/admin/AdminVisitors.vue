@@ -25,7 +25,9 @@ const searchQuery = ref('')
 const filterDevice = ref('all')
 const isTableMissing = ref(false)
 const isSqlCopied = ref(false)
-const isDeleteSqlCopied = ref(false)
+const isDeleteSqlCopied = ref(false
+  
+)
 const showDeleteHelp = ref(false)
 const isDeleting = ref(false)
 
